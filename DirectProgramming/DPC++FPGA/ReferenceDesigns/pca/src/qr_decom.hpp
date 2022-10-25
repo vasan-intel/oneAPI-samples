@@ -98,16 +98,12 @@ template<typename T> void QR_Decmp<T>::calculate_Q(){
     
     for(int i = 0; i < n; i++){
         // calculating the modulus 
-        std::cout << "\n\n";
         T mag = 0;
         for(int k = 0; k < n; k++){
             mag += this->matU[k*n+i] * this->matU[k*n+i];
-            // std::cout << this->matU[k*n+i] << " ";
         }
-        // std::cout <<"modulus is : " << modulus << std::endl;
         mag = sqrt(mag);
         mag = 1.0/mag;
-        // std::cout << "Modulus is : " << modulus << "\n";
 
         for(int k = 0; k < n; k++){
             this->matQ[k*n+i] = this->matU[k*n+i]*mag; 

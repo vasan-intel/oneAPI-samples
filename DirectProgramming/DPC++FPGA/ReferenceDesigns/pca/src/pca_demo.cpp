@@ -1,6 +1,7 @@
 #include<iostream>
 #include<math.h> 
 #include<cstdlib>
+#include<algorithm>
 
 #include "qr_decom.hpp"
 // #include <sycl/sycl.hpp>
@@ -37,11 +38,13 @@ making it nxp order matrix
 
 
 template <typename T> class PCA {
- private: 
+ public: 
     int n, p, debug;
     T *matA, *matdA, *vecU, *matC, *matC_tmp, *matQ, *matR;
     T *eigen_vecs, *eigen_vecs_tmp, *eigen_vals;
+    int* sorted_index;
     T *matTrans;
+
 
  public: 
     PCA(int n, int p, int debug);
@@ -54,6 +57,8 @@ template <typename T> class PCA {
     void sort_eigen_vecs();
     T* do_pca_steps();
     T* get_eigen_vals();
+    T* get_eigen_vecs();
+    int* sort_eigen_vals();
 
 };
 
@@ -73,7 +78,13 @@ template<typename T> PCA<T>::PCA(int n,int p, int debug = 0){
     this->eigen_vecs= new T[p*p];
     this->eigen_vecs_tmp= new T[p*p];
     this->eigen_vals = new T[p];
+    this->sorted_index = new int[p];
     this->matTrans = new T[p*p]; 
+
+    // initialing the index for sorting
+    for(int i = 0; i < p; i++){
+        this->sorted_index[i] = i;
+    }
 }
 
 template<typename T> PCA<T>::~PCA(){
@@ -88,6 +99,7 @@ template<typename T> PCA<T>::~PCA(){
     delete this->eigen_vecs;
     delete this->eigen_vecs_tmp;
     delete this->eigen_vals;
+    delete this->sorted_index;
     delete this->matTrans;
 }
 
@@ -163,7 +175,7 @@ template<typename T> void PCA<T>::calculate_covariance(){
             this->matC[i*p+j] = (1.0/(n-1))*this->matC[i*p+j];
             if(debug) std::cout << this->matC[i*p+j] << " ";
         }
-        std::cout << "\n";
+        if(debug) std::cout << "\n";
     }
 }
 
@@ -179,7 +191,7 @@ template<typename T> void PCA<T>::do_qrd_iteration(int itr){
     // everything is zero except digonal elements
     for(int i =0; i < p; i++){
         for(int j = 0; j < p; j++){
-            if(i==j){this->eigen_vecs[i*p+j] = 0;} else {this->eigen_vecs[i*p+j] = 0;}
+            if(i==j){this->eigen_vecs[i*p+j] = 1;} else {this->eigen_vecs[i*p+j] = 0;}
         }
     }
 
@@ -266,10 +278,17 @@ template<typename T> T* PCA<T>::do_pca_steps(){
     this->calculate_mean_vec();
     this->calculate_deviation_vec();
     this->calculate_covariance();
-    this->do_qrd_iteration(20);
+    this->do_qrd_iteration(40);
 
     return this->matC_tmp;
 }
+
+template<typename T> int* PCA<T>::sort_eigen_vals(){
+    std::sort(this->sorted_index, this->sorted_index+p, [&] (int i, int j) \
+    {return this->eigen_vals[i] > this->eigen_vals[j];});
+    return this->sorted_index;
+}
+
 
 template<typename T> T* PCA<T>::get_eigen_vals(){
     return this->eigen_vals;
@@ -277,11 +296,11 @@ template<typename T> T* PCA<T>::get_eigen_vals(){
 
 
 int main(){
-
+    typedef double F_type;
     int n = 10, p = 5;
-    PCA< float> pca(n, p, 1);
-    float * cov = pca.do_pca_steps();
-    float * eigen_vals = pca.get_eigen_vals();
+    PCA< F_type> pca(n, p, 0);
+    F_type * cov = pca.do_pca_steps();
+    F_type * eigen_vals = pca.get_eigen_vals();
 
     std::cout << "\nCovariance matrix is: \n";
     for(int i = 0; i < p; i++){
@@ -291,9 +310,22 @@ int main(){
         std::cout << "\n";
     }
 
+    int* index_ptr = pca.sort_eigen_vals();
     std::cout << "\nEigen values are: \n";
     for(int i = 0; i < p; i++){
-        std::cout << eigen_vals[i] << " ";
+        // std::cout << index_ptr[i] << " ";
+        std::cout << eigen_vals[pca.sorted_index[i]] << " ";
+    }
+    std::cout << "\n\n";
+
+
+    // Eigen vectors 
+    std::cout << "\ncorresponding eigen vectors are: \n";
+    for(int i =0; i < p; i++){
+        for(int j = 0; j < p; j++){
+            std::cout << pca.eigen_vecs[j*p+pca.sorted_index[i]] << " ";
+        }
+        std::cout << "\n";
     }
     std::cout << "\n\n";
 
