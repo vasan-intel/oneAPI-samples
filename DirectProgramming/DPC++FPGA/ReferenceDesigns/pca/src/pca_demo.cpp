@@ -35,7 +35,7 @@ making it nxp order matrix
 
 6. form the tranformation matrix using eigen vectors
 */
-
+typedef double F_type;
 
 template <typename T> class PCA {
  public: 
@@ -103,7 +103,8 @@ template<typename T> PCA<T>::~PCA(){
     delete this->matTrans;
 }
 
-double sample[10*5] = {0.5434049417909654,0.27836938509379616,0.4245175907491331,0.8447761323199037,0.004718856190972565,
+F_type sample[20*5] = {
+0.5434049417909654,0.27836938509379616,0.4245175907491331,0.8447761323199037,0.004718856190972565,
 0.12156912078311422,0.6707490847267786,0.8258527551050476,0.13670658968495297,0.57509332942725,
 0.891321954312264,0.20920212211718958,0.18532821955007506,0.10837689046425514,0.21969749262499216,
 0.9786237847073697,0.8116831490893233,0.1719410127325942,0.8162247487258399,0.2740737470416992,
@@ -112,7 +113,19 @@ double sample[10*5] = {0.5434049417909654,0.27836938509379616,0.4245175907491331
 0.5988433769284929,0.6038045390428536,0.10514768541205632,0.38194344494311006,0.03647605659256892,
 0.8904115634420757,0.9809208570123115,0.05994198881803725,0.8905459447285041,0.5769014994000329,
 0.7424796890979773,0.6301839364753761,0.5818421923987779,0.020439132026923157,0.2100265776728606,
-0.5446848781786475,0.7691151711056516,0.2506952291383959,0.2858956904068647,0.8523950878413064};
+0.5446848781786475,0.7691151711056516,0.2506952291383959,0.2858956904068647,0.8523950878413064,
+0.9750064936065875,0.8848532934911055,0.35950784393690227,0.5988589458757472,0.3547956116572998,
+0.34019021537064575,0.17808098950580487,0.23769420862405044,0.04486228246077528,0.5054314296357892,
+0.376252454297363,0.5928054009758866,0.6299418755874974,0.14260031444628352,0.933841299466419,
+0.9463798808091013,0.6022966577308656,0.38776628032663074,0.3631880041093498,0.20434527686864423,
+0.27676506139633517,0.24653588120354963,0.17360800174020508,0.9666096944873236,0.9570126003527981,
+0.5979736843289207,0.7313007530599226,0.3403852228374361,0.09205560337723862,0.4634980189371477,
+0.508698893238194,0.08846017300289077,0.5280352233180474,0.9921580365105283,0.3950359317582296,
+0.3355964417185683,0.8054505373292797,0.7543489945823536,0.3130664415885097,0.6340366829622751,
+0.5404045753007164,0.2967937508800147,0.11078790118244575,0.3126402978757431,0.4569791300492658,
+0.6589400702261969,0.2542575178177181,0.6411012587007017,0.20012360721840317,0.6576248055289837
+
+};
 
  // populating matrix a with random numbers
 template<typename T> void PCA<T>::populate_A(){
@@ -182,6 +195,15 @@ template<typename T> void PCA<T>::calculate_covariance(){
 
 template<typename T> void PCA<T>::do_qrd_iteration(int itr){
 
+    double tolerence;
+    if(sizeof(T) == sizeof(double)){
+        tolerence = 1.0e-18;
+    } else if(sizeof(T) == sizeof(double)){
+        tolerence = 1.0e-10;
+    } else {
+        tolerence = 1.0e-10;
+    }
+
     // copy matrix C to matrix C_tmp
     for(int i = 0; i< p*p; i++){
         this->matC_tmp[i] = this->matC[i];
@@ -198,9 +220,21 @@ template<typename T> void PCA<T>::do_qrd_iteration(int itr){
 
     QR_Decmp<T> qr_decmp(this->matC_tmp, p);
     //QRD iteration
-    for(int i = 0; i < itr; i++){
-        // taking last diagonal element as shift val
-        T s_val = this->matC_tmp[p*p-1];
+    for(int itr_i = 0;itr_i < itr; itr_i++){
+        // shift value calculation using Wilkinson's shift
+        T w_a = this->matC_tmp[p*(p-2)+p-2];
+        T w_b = this->matC_tmp[p*(p-2)+p-1];
+        T w_c = this->matC_tmp[p*(p-1)+p-1];
+        T delta = (w_a - w_c)/2;
+
+        double eigen_sq_diff = 0;
+        double eigen_total = 0;
+
+        int sign = (delta > 0) ? 1 : -1;
+
+        T s_val = w_c - (sign*w_b*w_b)/(fabs(delta) + sqrt(delta*delta+w_b*w_b));
+
+        // T s_val = this->matC_tmp[p*p-1];
         // subtract that from all diagonal elements of matC_tmp
         for(int i = 0; i < p; i++){
             this->matC_tmp[i*p+i] -= s_val;
@@ -264,10 +298,24 @@ template<typename T> void PCA<T>::do_qrd_iteration(int itr){
                 }
             }
         }
-    }
 
-    for(int i = 0; i < p; i++){
-        this->eigen_vals[i] = this->matC_tmp[i*p+i];
+
+        for(int i = 0; i < p; i++){
+            eigen_sq_diff += (this->eigen_vals[i]- this->matC_tmp[i*p+i])*(this->eigen_vals[i]- this->matC_tmp[i*p+i]);
+            eigen_total += this->matC_tmp[i*p+i]*this->matC_tmp[i*p+i];
+        }
+
+        for(int i = 0; i < p; i++){
+            this->eigen_vals[i] = this->matC_tmp[i*p+i];
+        }
+
+
+
+        if(eigen_sq_diff/eigen_total < tolerence){
+            std::cout << "Convergence achieved at iteration: " << itr_i << "\n\n";
+            break;
+        }
+
     }
 
 }
@@ -278,7 +326,7 @@ template<typename T> T* PCA<T>::do_pca_steps(){
     this->calculate_mean_vec();
     this->calculate_deviation_vec();
     this->calculate_covariance();
-    this->do_qrd_iteration(40);
+    this->do_qrd_iteration(200);
 
     return this->matC_tmp;
 }
@@ -296,8 +344,8 @@ template<typename T> T* PCA<T>::get_eigen_vals(){
 
 
 int main(){
-    typedef double F_type;
-    int n = 10, p = 5;
+    
+    int n = 20, p = 5;
     PCA< F_type> pca(n, p, 0);
     F_type * cov = pca.do_pca_steps();
     F_type * eigen_vals = pca.get_eigen_vals();

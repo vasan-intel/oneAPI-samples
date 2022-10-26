@@ -20,7 +20,7 @@ class QR_Decmp{
 
     public: 
         QR_Decmp(T *matA_ptr, int n);
-        ~QR_decmp();
+        ~QR_Decmp();
         void calculate_projection(int a, int b);
         void calculate_U();
         void calculate_Q();
@@ -29,7 +29,7 @@ class QR_Decmp{
         T* get_Q();
         T* get_R();
 
-}
+};
 
 
 
@@ -46,13 +46,14 @@ template<typename T>  QR_Decmp<T>::QR_Decmp(T *matA, int n){
 template <typename T> QR_Decmp<T>::~QR_Decmp(){
 
     delete this->matU;
+    delete this->vecPrj;
     delete this->matR;
     delete this->matQ;
 }
 
 template<typename T> void QR_Decmp<T>::calculate_projection(int a , int b){
     T inner_ua = 0;
-    t inner_uu = 0;
+    T inner_uu = 0;
 
     // inner product <u,a>
     for(int i = 0; i < n; i++){
@@ -65,7 +66,7 @@ template<typename T> void QR_Decmp<T>::calculate_projection(int a , int b){
     }
 
     // projection vector 
-    for(int  = 0; i < n; i++){
+    for(int i = 0; i < n; i++){
         this->vecPrj[i] = this->matU[i*n+a] * inner_ua/inner_uu;
     }
 }
@@ -94,11 +95,12 @@ template<typename T> void QR_Decmp<T>::calculate_U(){
 template<typename T> void QR_Decmp<T>::calculate_Q(){
     // Q = [e_{0}, e_{1} .. e_{n-1}]
     // e_{i} = u_{i}/||u_{i}||
-    T modulus = 0;
+    
     for(int i = 0; i < n; i++){
         // calculating the modulus 
+        T modulus = 0;
         for(int k = 0; k < n; k++){
-            modulus = this->matU[k*n+i] * this->matU[k*n+i];
+            modulus += this->matU[k*n+i] * this->matU[k*n+i];
         }
         modulus = sqrt(modulus);
 
@@ -113,7 +115,7 @@ template<typename T> void QR_Decmp<T>::calculate_Q(){
 template<typename T> void QR_Decmp<T>::calculate_R(){
     // R matrix is an upper trangular matrix with element (i,j)
     // corrsponds to <e_{i}, a_{j}>
-    for(i = 0; i < n; i++){
+    for(int i = 0; i < n; i++){
         for (int j = i; j < n; j++){
             this->matR[i*n+j] = 0;
             for(int k = 0; k < n; k++){
@@ -149,8 +151,8 @@ int main(){
     float *matQ = qr_decmp.get_Q();
 
     // Q matrix is 
-    std::cout << "\nMatrix Q is: \n"
-    for(i =0; i < n; i++){
+    std::cout << "\nMatrix Q is: \n";
+    for(int i =0; i < n; i++){
         for(int j = 0; j < n; j++){
             std::cout << matQ[i*n+j] << " ";
         }
@@ -158,8 +160,8 @@ int main(){
     }
 
     // R matrix is 
-    std::cout << "\nMatrix R is: \n"
-    for(i =0; i < n; i++){
+    std::cout << "\nMatrix R is: \n";
+    for(int i =0; i < n; i++){
         for(int j = 0; j < n; j++){
             std::cout << matR[i*n+j] << " ";
         }
