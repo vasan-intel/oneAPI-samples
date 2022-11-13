@@ -177,6 +177,14 @@ int main(int argc, char *argv[]) {
     QRDecomposition(a_matrix, q_matrix, r_matrix, q, kMatricesToDecompose,
                                                                   repetitions);
 
+    // std::cout << "\n\nQ Matrix is : \n";
+    // for(int i = 0; i < kRows; i++){
+    //   for(int j = 0; j < kColumns; j++){
+    //     std::cout << q_matrix[i*kColumns +j] << " ";
+    //   }
+    //   std::cout << "\n";
+    // }
+
     // For output post-processing (op)
     T q_matrix_op[kRows][kColumns];
     T r_matrix_op[kRows][kColumns];

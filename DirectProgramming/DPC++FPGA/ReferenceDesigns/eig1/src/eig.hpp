@@ -199,6 +199,20 @@ struct StreamingQRD {
         });
       }
 
+      // Initial Identity Eigen vector matrix 
+      row_tuple QQ_matrix[rows];
+      [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
+      for(int i_row = 0; i_row < rows; i_row++){
+        row_tuple QQ_row_write;
+        fpga_tools::UnrolledLoop<columns>([&] (auto k){
+          QQ_row_write.template get<k>() = (k == i_row) ? 1 : 0;
+        });
+        QQ_matrix[i_row] = QQ_row_write;
+      }
+
+
+
+
       // Compute the QR Decomposition
 
       // r_result write index
@@ -403,24 +417,47 @@ struct StreamingQRD {
       // Number of upper-right elements in the R output matrix
       constexpr int kRMatrixSize = columns * (columns + 1) / 2;
       row_tuple row_write;
-      // int r_counter = 0;
-      // [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
-      // for(int i_row = 0; i_row < rows; i_row++){
-      //   fpga_tools::UnrolledLoop<rows>([&](auto t) {
-      //     row_write.template get<t>() = 0;
-      //   });
-      //   for(int j_col = i_row; j_col < columns; j_col++){
-          
-      //     fpga_tools::UnrolledLoop<rows>([&](auto t) {
-      //       row_write.template get<t>() = 
-      //               (t==j_col) ? r_result[r_counter] : row_write.template get<t>();
-      //     });
-      //     r_counter++;
-      //     r_matrix[i_row] = row_write;
-      //   }
 
-      // }
 
+      // RQ computation and writig the results back in a_load 
+      column_tuple colA_write;
+      [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
+      for(int i_col = 0; i_col < columns; i_col++){
+        for(int i_row = 0; i_row < rows; i_row++){
+          row_tuple r_load = r_matrix[i_row];
+          column_tuple q_load = q_result[i_col];
+          TT sum = 0;
+          fpga_tools::UnrolledLoop<rows> ([&] (auto k){
+            sum += r_load.template get<k>() * q_load.template get<k>();
+          });
+          fpga_tools::UnrolledLoop<columns> ([&] (auto k){
+            colA_write.template get<k> () = (k==i_row) ? sum : colA_write.template get<k> ();
+          });
+        }
+        a_load[i_col] = colA_write;
+      }
+
+      // Eigen vector QQ computation
+      row_tuple QQ_write;
+      [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
+      for(int i_row = 0; i_row < rows; i_row++){
+        for(int j_col = 0; j_col < columns; j_col++){
+          row_tuple QQ_load = QQ_matrix[i_row];
+          column_tuple Q_load = q_result[j_col];
+          TT sum = 0;
+          fpga_tools::UnrolledLoop<rows> ([&] (auto k){
+            sum += QQ_load.template get<k>() * Q_load.template get<k>();
+          });
+          fpga_tools::UnrolledLoop<rows> ([&] (auto k) {
+            QQ_write.template get<k> () = 
+                          (k==j_col) ? sum : QQ_write.template get<k> ();
+          });
+        }
+        QQ_matrix[i_row] = QQ_write;
+      } 
+
+
+      // Writing out Matrix R to streaming interface
       [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
       for(int i_row = 0; i_row < rows; i_row++){
         fpga_tools::UnrolledLoop<rows>([&](auto t) {
@@ -448,28 +485,48 @@ struct StreamingQRD {
       //   ROut::write(r_result[r_idx]);
       // }
 
-      [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
-      for (ac_int<kLoopIterBitSize, false> li = 0; li < kLoopIter; li++) {
-        int column_iter = li % kLoopIterPerColumn;
-        bool get[kLoopIterPerColumn];
-        fpga_tools::UnrolledLoop<kLoopIterPerColumn>([&](auto k) {
-          get[k] = column_iter == k;
-          column_iter = sycl::ext::intel::fpga_reg(column_iter);
-        });
-
-        fpga_tools::NTuple<TT, pipe_size> pipe_write;
-        fpga_tools::UnrolledLoop<kLoopIterPerColumn>([&](auto t) {
+      row_tuple row_load;
+      TT row_val;
+      // row_val.template get<0> () = 1;
+      fpga_tools::NTuple<TT, pipe_size> pipe_write;
+      for(int i_col = 0; i_col < columns; i_col++){
+        for(int j_row = 0; j_row < kLoopIterPerColumn*pipe_size; j_row++){
+          row_load = (j_row < rows) ? QQ_matrix[j_row] : row_load; 
           fpga_tools::UnrolledLoop<pipe_size>([&](auto k) {
-            if constexpr (t * pipe_size + k < rows) {
-              pipe_write.template get<k>() =
-                  get[t] ? q_result[li / kLoopIterPerColumn]
-                               .template get<t * pipe_size + k>()
-                    : sycl::ext::intel::fpga_reg(pipe_write.template get<k>());
-            }
+            fpga_tools::UnrolledLoop<rows>([&](auto t) {
+              row_val  = (t == i_col) ? row_load.template get<t>() : row_val;
+            });
+            pipe_write.template get<k> () = 
+              (k == j_row % pipe_size) ? row_val  : pipe_write.template get<k> ();
           });
-        });
-        QOut::write(pipe_write);
+          if(j_row % pipe_size == pipe_size-1){
+            QOut::write(pipe_write);
+          }
+        }
       }
+
+      // [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
+      // for (ac_int<kLoopIterBitSize, false> li = 0; li < kLoopIter; li++) {
+      //   int column_iter = li % kLoopIterPerColumn;
+      //   bool get[kLoopIterPerColumn];
+      //   fpga_tools::UnrolledLoop<kLoopIterPerColumn>([&](auto k) {
+      //     get[k] = column_iter == k;
+      //     column_iter = sycl::ext::intel::fpga_reg(column_iter);
+      //   });
+
+      //   fpga_tools::NTuple<TT, pipe_size> pipe_write;
+      //   fpga_tools::UnrolledLoop<kLoopIterPerColumn>([&](auto t) {
+      //     fpga_tools::UnrolledLoop<pipe_size>([&](auto k) {
+      //       if constexpr (t * pipe_size + k < rows) {
+      //         pipe_write.template get<k>() =
+      //             get[t] ? QQ_matrix[t*pipe_size + k]
+      //                          .template get<(li/kLoopIterPerColumn)>()
+      //               : sycl::ext::intel::fpga_reg(pipe_write.template get<k>());
+      //       }
+      //     });
+      //   });
+      //   QOut::write(pipe_write);
+      // }
 
     }  // end of while(1)
   }    // end of operator
