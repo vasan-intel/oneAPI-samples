@@ -1,4 +1,5 @@
 #include <math.h>
+#include <cstring>
 
 #include <sycl/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
@@ -11,6 +12,7 @@
 #include "dpc_common.hpp"
 
 #include "qrd.hpp"
+#include "qr_decom.hpp"
 
 /*
   COMPLEX, COLS_COMPONENT, ROWS_COMPONENT and FIXED_ITERATIONS are defined
@@ -177,13 +179,50 @@ int main(int argc, char *argv[]) {
     QRDecomposition(a_matrix, q_matrix, r_matrix, q, kMatricesToDecompose,
                                                                   repetitions);
 
-    // std::cout << "\n\nQ Matrix is : \n";
-    // for(int i = 0; i < kRows; i++){
-    //   for(int j = 0; j < kColumns; j++){
-    //     std::cout << q_matrix[i*kColumns +j] << " ";
-    //   }
-    //   std::cout << "\n";
-    // }
+    // eigen value & vector computation on CPU for same data
+    std::vector<T> a_matrix_cpu;
+    a_matrix_cpu.resize(kAMatrixSize * kMatricesToDecompose);
+    // copy A matrix to CPU data
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        a_matrix_cpu[i*kRows+j] = a_matrix[j*kRows+i];
+      }
+    }
+
+    // std::memcpy(a_matrix_cpu.data(), a_matrix.data(), kAMatrixSize * kMatricesToDecompose*sizeof(T));
+    QR_Decmp<T> qrd_cpu(a_matrix_cpu.data(), kRows);
+    for(int i = 0; i < 1; i++){
+      qrd_cpu.QR_decompose();
+      T * R = qrd_cpu.get_R();
+      T * Q = qrd_cpu.get_Q();
+      // RQ computation and updating A 
+      for(int i = 0; i < kRows; i++){
+        for(int j = 0; j < kRows; j++){
+          a_matrix_cpu[i*kRows+j] = 0;
+          for(int k = 0; k < kRows; k++){
+            a_matrix_cpu[i*kRows+j] += R[i*kRows+k]*Q[k*kRows+j];
+          }
+        }
+      }
+    
+    }
+
+    // Printig the diff matrix 
+    std::cout << "\nDiff matrix is: \n";
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        std::cout << a_matrix_cpu[i*kRows+j] << " ";
+      }
+      std::cout << "\n";
+    }
+
+    std::cout << "\n\nDiff matrix is: \n";
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        std::cout << q_matrix[j*kRows+i] << " ";
+      }
+      std::cout << "\n";
+    }
 
     // For output post-processing (op)
     T q_matrix_op[kRows][kColumns];
