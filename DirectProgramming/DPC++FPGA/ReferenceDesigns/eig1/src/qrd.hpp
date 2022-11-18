@@ -49,7 +49,7 @@ void QRDecompositionImpl(
 
   constexpr int kAMatrixSize = columns * rows;
   constexpr int kQMatrixSize = columns * rows;
-  constexpr int kRMatrixSize = columns * (columns + 1) / 2;
+  constexpr int kRMatrixSize = columns * rows;
   constexpr int kNumElementsPerDDRBurst = is_complex ? 4 : 8;
 
   using PipeType = fpga_tools::NTuple<TT, kNumElementsPerDDRBurst>;
@@ -57,8 +57,7 @@ void QRDecompositionImpl(
   // Pipes to communicate the A, Q and R matrices between kernels
   using AMatrixPipe = sycl::ext::intel::pipe<APipe, PipeType, 3>;
   using QMatrixPipe = sycl::ext::intel::pipe<QPipe, PipeType, 3>;
-  using RMatrixPipe = sycl::ext::intel::pipe<RPipe, TT,
-                                                  kNumElementsPerDDRBurst * 4>;
+  using RMatrixPipe = sycl::ext::intel::pipe<RPipe, PipeType, 3>;
 
   // Allocate FPGA DDR memory.
   TT *a_device = sycl::malloc_device<TT>(kAMatrixSize * matrix_count, q);
@@ -100,17 +99,21 @@ void QRDecompositionImpl(
 
     // Repeat matrix_count complete R matrix pipe reads
     // for as many repetitions as needed
-    for (int repetition_index = 0; repetition_index < repetitions;
-         repetition_index++) {
+     MatrixReadPipeToDDR<TT, rows, columns, kNumElementsPerDDRBurst,
+                        RMatrixPipe>(r_device, matrix_count, repetitions);
+
+
+    // for (int repetition_index = 0; repetition_index < repetitions;
+    //      repetition_index++) {
       
-      [[intel::loop_coalesce(2)]]  // NO-FORMAT: Attribute
-      for (int matrix_index = 0; matrix_index < matrix_count; matrix_index++) {
-        for (int r_idx = 0; r_idx < kRMatrixSize; r_idx++) {
-          vector_ptr_device[matrix_index * kRMatrixSize + r_idx] =
-              RMatrixPipe::read();
-        }  // end of r_idx
-      }    // end of repetition_index
-    }      // end of li
+    //   [[intel::loop_coalesce(2)]]  // NO-FORMAT: Attribute
+    //   for (int matrix_index = 0; matrix_index < matrix_count; matrix_index++) {
+    //     for (int r_idx = 0; r_idx < kRMatrixSize; r_idx++) {
+    //       vector_ptr_device[matrix_index * kRMatrixSize + r_idx] =
+    //           RMatrixPipe::read();
+    //     }  // end of r_idx
+    //   }    // end of repetition_index
+    // }      // end of li
   });
 
   q_event.wait();

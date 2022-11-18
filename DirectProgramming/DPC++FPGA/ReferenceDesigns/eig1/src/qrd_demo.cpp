@@ -77,9 +77,12 @@ int main(int argc, char *argv[]) {
   constexpr size_t kColumns = COLS_COMPONENT;
   constexpr size_t kAMatrixSize = kRows * kColumns;
   constexpr size_t kQMatrixSize = kRows * kColumns;
-  constexpr size_t kRMatrixSize = kColumns * (kColumns + 1) / 2;
+  constexpr size_t kRMatrixSize = kRows * kColumns;
   constexpr size_t kQRMatrixSize = kQMatrixSize + kRMatrixSize;
   constexpr bool kComplex = COMPLEX != 0;
+
+  int iter = 10000;
+
 
   // Get the number of times we want to repeat the decomposition
   // from the command line.
@@ -139,17 +142,19 @@ int main(int argc, char *argv[]) {
               << " of size "
               << kRows << "x" << kColumns << " " << std::endl;
 
-    // Generate the random input matrices
+    // Generate the random symmetric square matrices
     srand(kRandomSeed);
 
     for(int matrix_index = 0; matrix_index < kMatricesToDecompose;
                                                                 matrix_index++){
       for (size_t row = 0; row < kRows; row++) {
-        for (size_t col = 0; col < kColumns; col++) {
+        for (size_t col = 0; col <= row; col++) {
           float random_real = rand() % (kRandomMax - kRandomMin) + kRandomMin;
   #if COMPLEX == 0
           a_matrix[matrix_index * kAMatrixSize
                  + col * kRows + row] = random_real;
+          a_matrix[matrix_index * kAMatrixSize
+                 + row * kRows + col] = random_real;
   #else
           float random_imag = rand() % (kRandomMax - kRandomMin) + kRandomMin;
           ac_complex<float> random_complex{random_real, random_imag};
@@ -181,7 +186,14 @@ int main(int argc, char *argv[]) {
 
     // eigen value & vector computation on CPU for same data
     std::vector<T> a_matrix_cpu;
+    std::vector<T> eigen_vectors_cpu;
+    std::vector<T> TmpRow;
+
     a_matrix_cpu.resize(kAMatrixSize * kMatricesToDecompose);
+    eigen_vectors_cpu.resize(kAMatrixSize * kMatricesToDecompose);
+    TmpRow.resize(kRows);
+
+
     // copy A matrix to CPU data
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
@@ -189,9 +201,27 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    //initialize the eigen vectors to identity mtrix
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        eigen_vectors_cpu[i*kRows+j] = (i == j) ? 1 : 0;
+      }
+    }
+
+
+     // Printig the diff matrix 
+    std::cout << "\nNew A matrix before computation: \n";
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        std::cout << a_matrix[i*kRows+j] << " ";
+      }
+      std::cout << "\n";
+    }
+
     // std::memcpy(a_matrix_cpu.data(), a_matrix.data(), kAMatrixSize * kMatricesToDecompose*sizeof(T));
     QR_Decmp<T> qrd_cpu(a_matrix_cpu.data(), kRows);
-    for(int i = 0; i < 1; i++){
+    iter = 1;
+    for(int li = 0; li < iter; li++){
       qrd_cpu.QR_decompose();
       T * R = qrd_cpu.get_R();
       T * Q = qrd_cpu.get_Q();
@@ -204,22 +234,56 @@ int main(int argc, char *argv[]) {
           }
         }
       }
+
+      // Eigen vector accumulation 
+      for(int i = 0; i < kRows; i++){
+        std::fill(TmpRow.begin(), TmpRow.end(), 0);
+        for(int j = 0; j < kRows; j++){
+          for(int k = 0; k < kRows; k++){
+            TmpRow[j] += eigen_vectors_cpu[i*kRows+k]*Q[k*kRows+j];
+          }
+        }
+        for(int k = 0; k < kRows; k++) eigen_vectors_cpu[i*kRows+k] = TmpRow[k];
+      }
+
+
+
+      // convergence test 
+      bool close2zero = 1;
+      const float threshold = 1e-6;
+      // check zero thereshold for lower part 
+      for(int i = 0; i < kRows; i++){
+        for(int j = 0; j < i; j++){
+          if(std::fabs(a_matrix_cpu[i*kRows+j]) > threshold){
+            std::cout << "failed at i: " << i << " j: " << j << "\n"; 
+            close2zero = 0;
+            break;
+          }
+          if(!close2zero){
+            break;
+          }
+        }
+      }
+      if(close2zero){
+        std::cout << "convergence achieved at iter: " << li << "\n";
+        break;
+      }
     
     }
 
     // Printig the diff matrix 
-    std::cout << "\nDiff matrix is: \n";
+    std::cout << "\nNew A matrix from cpu computation: \n";
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
-        std::cout << a_matrix_cpu[i*kRows+j] << " ";
+        std::cout << eigen_vectors_cpu[i*kRows+j] << " ";
       }
       std::cout << "\n";
     }
 
-    std::cout << "\n\nDiff matrix is: \n";
+    std::cout << "\n\nNew A matrix from SYCL kernel computation: \n";
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
-        std::cout << q_matrix[j*kRows+i] << " ";
+        std::cout << r_matrix[i*kRows+j] << " ";
       }
       std::cout << "\n";
     }

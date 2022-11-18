@@ -41,6 +41,13 @@ template<typename T>  QR_Decmp<T>::QR_Decmp(T *matA, int n){
     this->vecPrj = new T[n];
     this->matR = new T[n*n];
     this->matQ = new T[n*n];
+
+    // Initialising the R matrix to zero
+    for(int i = 0; i < n; i++){
+        for(int j = 0; j < n; j++){
+            this->matR[i*n+j] = 0;
+        }
+    }
 }
 
 template <typename T> QR_Decmp<T>::~QR_Decmp(){
@@ -122,7 +129,7 @@ template<typename T> void QR_Decmp<T>::calculate_R(){
     // R matrix is an upper trangular matrix with element (i,j)
     // corrsponds to <e_{i}, a_{j}>
     for(int i = 0; i < n; i++){
-        for (int j = 0; j < n; j++){
+        for (int j = i; j < n; j++){
             this->matR[i*n+j] = 0;
             for(int k = 0; k < n; k++){
                 this->matR[i*n+j] += this->matQ[k*n+i] * this->matA_ptr[k*n+j];
