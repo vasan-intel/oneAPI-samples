@@ -424,69 +424,54 @@ struct StreamingQRD {
         const float threshold = 1e-6;
         bool converged = 1;
 
-        ac_int<kIBitSize , false> i_row = 0;
-        ac_int<kIBitSize , false> j_col = 0;
-
-        [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
-        [[intel::ivdep(QQ_matrix)]]  // NO-FORMAT: Attribute
-        for(ac_int<kMatrixBitSize, false> mli = 0; mli < kMatrixSize; mli++){
-
-          ///////////////////////////////////////////////////////
-          // QQ computation 
-          ///////////////////////////////////////////////////////
-          if(j_col == 0){          
-            QQ_load = QQ_matrix[i_row];
-          }
-
-          column_tuple Q_load = q_result[j_col];
-          TT sum_QQ = 0;
-          fpga_tools::UnrolledLoop<rows> ([&] (auto k){
-            sum_QQ += QQ_load.template get<k>() * Q_load.template get<k>();
-          });
-
-          fpga_tools::UnrolledLoop<rows> ([&] (auto k) {
-            if(k == j_col){
-              QQ_write.template get<k> () = sum_QQ;
+        [[intel::initiation_interval(1)]]  
+        [[intel::loop_coalesce(2)]]
+        for(ac_int<kIBitSize , false> i_ll = 0; i_ll < columns; i_ll++){
+          for(ac_int<kIBitSize , false> j_ll = 0; j_ll < rows; j_ll++){
+            ///////////////////////////////////////////////////////
+            // QQ computation 
+            ///////////////////////////////////////////////////////
+            if(j_ll == 0){          
+              QQ_load = QQ_matrix[i_ll];
             }
-          });
 
-          if(j_col ==columns - 1){
-            QQ_matrix[i_row] = QQ_write;
+            column_tuple Q_load = q_result[j_ll];
+            TT sum_QQ = 0;
+            fpga_tools::UnrolledLoop<rows> ([&] (auto k){
+              sum_QQ += QQ_load.template get<k>() * Q_load.template get<k>();
+            });
+
+            fpga_tools::UnrolledLoop<rows> ([&] (auto k) {
+              if(k == j_ll){
+                QQ_write.template get<k> () = sum_QQ;
+              }
+            });
+
+            if(j_ll ==columns - 1){
+              QQ_matrix[i_ll] = QQ_write;
+            }
+
+            ////////////////////////////////////////////////////////
+            // RQ computation 
+            ////////////////////////////////////////////////////////
+            if(j_ll == 0){
+              Q_load_RQ = Q_load;
+            }
+            row_tuple r_load = r_matrix[j_ll]; 
+
+            TT sum_RQ = 0;
+            fpga_tools::UnrolledLoop<rows> ([&] (auto k){
+              sum_RQ += r_load.template get<k>() * Q_load_RQ.template get<k>();
+            });
+            converged = (j_ll < i_ll && fabs(sum_RQ) > threshold) ? 0 : converged;
+            fpga_tools::UnrolledLoop<columns> ([&] (auto k){
+              colA_write.template get<k> () = (k==i_ll) ? sum_RQ: colA_write.template get<k> (); 
+
+            });
+            a_load[i_ll] = colA_write; 
+
           }
-
-          ////////////////////////////////////////////////////////
-          // RQ computation 
-          ////////////////////////////////////////////////////////
-          if(j_col == 0){
-            Q_load_RQ = Q_load;
-          }
-          row_tuple r_load = r_matrix[j_col]; 
-
-          TT sum_RQ = 0;
-          fpga_tools::UnrolledLoop<rows> ([&] (auto k){
-            sum_RQ += r_load.template get<k>() * Q_load_RQ.template get<k>();
-          });
-          converged = (j_col < i_row && fabs(sum_RQ) > threshold) ? 0 : converged;
-          fpga_tools::UnrolledLoop<columns> ([&] (auto k){
-            colA_write.template get<k> () = (k==i_row) ? sum_RQ: colA_write.template get<k> (); 
-
-          });
-          a_load[i_row] = colA_write;  
-
-
-          //////////////////////////////////
-          // row column index update
-          /////////////////////////////////
-          if(j_col == columns -1){
-            i_row++;
-            j_col = 0;
-          } else {
-            j_col++;
-          }
-
-
-        } 
-        
+        }
 
         if(converged){
           break;
