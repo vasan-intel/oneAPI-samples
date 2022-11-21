@@ -234,7 +234,7 @@ int main(int argc, char *argv[]) {
 
     // std::memcpy(a_matrix_cpu.data(), a_matrix.data(), kAMatrixSize * kMatricesToDecompose*sizeof(T));
     QR_Decmp<T> qrd_cpu(a_matrix_cpu.data(), kRows);
-    iter = 1000;
+    iter = 10000;
     for(int li = 0; li < iter; li++){
       qrd_cpu.QR_decompose();
       T * R = qrd_cpu.get_R();
@@ -348,7 +348,7 @@ int main(int argc, char *argv[]) {
     int errorCountRQ = 0;
      for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
-        if(fabs(rq_matrix[j*kRows+i] - a_matrix_cpu[i*kRows+j]) > kErrorThresholdRQ*fabs(a_matrix_cpu[i*kRows+j])  || 
+        if((fabs(rq_matrix[j*kRows+i] - a_matrix_cpu[i*kRows+j]) > kErrorThresholdRQ*fabs(a_matrix_cpu[i*kRows+j])) && i == j  || 
             isnan(rq_matrix[j*kRows+i]) || isnan(a_matrix_cpu[i*kRows+j])){
               errorCountRQ++;
         }

@@ -209,7 +209,7 @@ struct StreamingQRD {
         QQ_matrix[i_row] = QQ_row_write;
       }
 
-      const int QR_RQ_iterations = 1000;
+      const int QR_RQ_iterations = 10000;
       constexpr int kIBitSize_QR_RQ_itr = fpga_tools::BitsForMaxValue<QR_RQ_iterations + 1>() + 1;
 
       int converge_itr = 1;
@@ -422,7 +422,6 @@ struct StreamingQRD {
         // RQ computation and writig the results back in a_load 
         
         column_tuple colA_write;
-
         const float threshold = 1e-6;
         bool converged = 1;
 
