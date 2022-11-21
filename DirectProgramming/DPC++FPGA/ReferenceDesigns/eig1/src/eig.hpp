@@ -40,9 +40,9 @@ template <typename T,        // The datatype for the computation
                              // operation
           typename AIn,      // A matrix input pipe, receive pipe_size
                              // elements from the pipe with each read
-          typename QOut,     // Q matrix output pipe, send pipe_size
+          typename RQOut,     // Q matrix output pipe, send pipe_size
                              // elements to the pipe with each write
-          typename ROut      // R matrix output pipe, send pipe_size
+          typename QQOut      // R matrix output pipe, send pipe_size
                              // elements to the pipe with each write.
                              // Only upper-right elements of R are
                              // sent in row order, starting with row 0.
@@ -209,14 +209,16 @@ struct StreamingQRD {
         QQ_matrix[i_row] = QQ_row_write;
       }
 
+      const int QR_RQ_iterations = 1000;
+      constexpr int kIBitSize_QR_RQ_itr = fpga_tools::BitsForMaxValue<QR_RQ_iterations + 1>() + 1;
 
-
+      int converge_itr = 1;
       // Iterative loop for QR and RQ/QQ coputation
-      for(int itr = 0; itr < 1; itr++){
+      for(ac_int<kIBitSize_QR_RQ_itr, false> itr = 0; itr < QR_RQ_iterations; itr++){
 
         // Compute the QR Decomposition
 
-        // a local copy of a_{i+1} that is used across multiple j iterations
+        // aconverged local copy of a_{i+1} that is used across multiple j iterations
         // for the computation of pip1 and p
         TT a_ip1[rows];
         // a local copy of a_ip1 that is used across multiple j iterations
@@ -415,7 +417,7 @@ struct StreamingQRD {
         // Eigen vector QQ computation
         row_tuple QQ_write;
         row_tuple QQ_load;
-        column_tuple Q_load_RQ;
+        column_tuple Q_load_RQ, Q_load_RQ_tmp;
 
         // RQ computation and writig the results back in a_load 
         
@@ -454,8 +456,14 @@ struct StreamingQRD {
             ////////////////////////////////////////////////////////
             // RQ computation 
             ////////////////////////////////////////////////////////
-            if(j_ll == 0){
+            if(j_ll == i_ll+1){
+              Q_load_RQ_tmp = Q_load;
+            }
+
+            if(j_ll == 0 && i_ll == 0){
               Q_load_RQ = Q_load;
+            } else if(j_ll == 0){
+              Q_load_RQ = Q_load_RQ_tmp;
             }
             row_tuple r_load = r_matrix[j_ll]; 
 
@@ -463,17 +471,17 @@ struct StreamingQRD {
             fpga_tools::UnrolledLoop<rows> ([&] (auto k){
               sum_RQ += r_load.template get<k>() * Q_load_RQ.template get<k>();
             });
-            converged = (j_ll < i_ll && fabs(sum_RQ) > threshold) ? 0 : converged;
+            converged = (j_ll > i_ll && fabs(sum_RQ) > threshold) ? 0 : converged;
             fpga_tools::UnrolledLoop<columns> ([&] (auto k){
-              colA_write.template get<k> () = (k==i_ll) ? sum_RQ: colA_write.template get<k> (); 
+              colA_write.template get<k> () = (k==j_ll) ? sum_RQ: colA_write.template get<k> (); 
 
             });
             a_load[i_ll] = colA_write; 
-
           }
         }
 
         if(converged){
+          converge_itr = itr;
           break;
         }
 
@@ -506,7 +514,7 @@ struct StreamingQRD {
             }
           });
         });
-        ROut::write(pipe_write);
+        QQOut::write(pipe_write);
       }
       
 
@@ -533,7 +541,8 @@ struct StreamingQRD {
             }
           });
         });
-        QOut::write(pipe_write);
+        // if(li == 0){pipe_write.template get<0> () = converge_itr;}
+        RQOut::write(pipe_write);
       }
 
     }  // end of while(1)
