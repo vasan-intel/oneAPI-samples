@@ -177,10 +177,10 @@ void Hess_QR_Decmp<T>::hess_qr_rq(){
         }
     }
 
-    // // elements other than on tri-diagonal are set to zero
-    // for(int i = 0; i < n; i++){
-    //     for(int j = 0; j < n; j++){
-    //         this->matH[i*n+j] = (abs(i-j) > 1 ) ? 0 : this->matH[i*n+j];
-    //     }
-    // }
+    // elements other than on tri-diagonal are set to zero
+    for(int i = 0; i < n; i++){
+        for(int j = 0; j < n; j++){
+            this->matH[i*n+j] = (abs(i-j) > 1 ) ? 0 : this->matH[i*n+j];
+        }
+    }
 }

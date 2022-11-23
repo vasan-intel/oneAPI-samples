@@ -5,6 +5,16 @@
 #include "unrolled_loop.hpp"
 #include "constexpr_math.hpp"
 
+
+#ifdef __SYCL_DEVICE_ONLY__
+  #define CL_CONSTANT __attribute__((opencl_constant))
+#else
+  #define CL_CONSTANT
+#endif
+#define PRINTF(format, ...) { \
+            static const CL_CONSTANT char _format[] = format; \
+            sycl::ext::oneapi::experimental::printf(_format, ## __VA_ARGS__); }
+
 namespace fpga_linalg {
 
 /*
@@ -422,7 +432,7 @@ struct StreamingQRD {
         // RQ computation and writig the results back in a_load 
         
         column_tuple colA_write;
-        const float threshold = 1e-6;
+        const float threshold = 1e-1;
         bool converged = 1;
 
         [[intel::initiation_interval(1)]]  
@@ -471,6 +481,8 @@ struct StreamingQRD {
               sum_RQ += r_load.template get<k>() * Q_load_RQ.template get<k>();
             });
             converged = (j_ll > i_ll && fabs(sum_RQ) > threshold) ? 0 : converged;
+            // sum_RQ = (j_ll > i_ll && fabs(sum_RQ) < threshold) ? 0 : sum_RQ;
+
             fpga_tools::UnrolledLoop<columns> ([&] (auto k){
               colA_write.template get<k> () = (k==j_ll) ? sum_RQ: colA_write.template get<k> (); 
 
@@ -481,6 +493,7 @@ struct StreamingQRD {
 
         if(converged){
           converge_itr = itr;
+          PRINTF("Converged at iteration: %d\n", converge_itr);
           break;
         }
 

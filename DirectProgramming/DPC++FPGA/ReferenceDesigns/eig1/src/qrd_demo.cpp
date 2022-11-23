@@ -5,6 +5,7 @@
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <sycl/ext/intel/ac_types/ac_complex.hpp>
 
+
 #include <list>
 
 // dpc_common.hpp can be found in the dev-utilities include folder.
@@ -13,6 +14,7 @@
 
 #include "qrd.hpp"
 #include "qr_decom.hpp"
+#include "hessenberg_qrd.hpp"
 
 /*
   COMPLEX, COLS_COMPONENT, ROWS_COMPONENT and FIXED_ITERATIONS are defined
@@ -33,28 +35,28 @@
 */
 #if COMPLEX == 0
 // Real single precision floating-point QR Decomposition
-void QRDecomposition(std::vector<float> &a_matrix, std::vector<float> &q_matrix,
-                     std::vector<float> &r_matrix, sycl::queue &q,
-                     int matrix_count,
-                     int repetitions) {
-  constexpr bool is_complex = false;
-  QRDecompositionImpl<COLS_COMPONENT, ROWS_COMPONENT, FIXED_ITERATIONS,
-                       is_complex, float>(a_matrix, q_matrix, r_matrix, q,
-                                          matrix_count, repetitions);
-
-}
-
-// Real double precision floating-point QR Decomposition
-// void QRDecomposition(std::vector<double> &a_matrix, std::vector<double> &q_matrix,
-//                      std::vector<double> &r_matrix, sycl::queue &q,
+// void QRDecomposition(std::vector<float> &a_matrix, std::vector<float> &q_matrix,
+//                      std::vector<float> &r_matrix, sycl::queue &q,
 //                      int matrix_count,
 //                      int repetitions) {
 //   constexpr bool is_complex = false;
 //   QRDecompositionImpl<COLS_COMPONENT, ROWS_COMPONENT, FIXED_ITERATIONS,
-//                        is_complex, double>(a_matrix, q_matrix, r_matrix, q,
+//                        is_complex, float>(a_matrix, q_matrix, r_matrix, q,
 //                                           matrix_count, repetitions);
 
 // }
+
+// Real double precision floating-point QR Decomposition
+void QRDecomposition(std::vector<double> &a_matrix, std::vector<double> &q_matrix,
+                     std::vector<double> &r_matrix, sycl::queue &q,
+                     int matrix_count,
+                     int repetitions) {
+  constexpr bool is_complex = false;
+  QRDecompositionImpl<COLS_COMPONENT, ROWS_COMPONENT, FIXED_ITERATIONS,
+                       is_complex, double>(a_matrix, q_matrix, r_matrix, q,
+                                          matrix_count, repetitions);
+
+}
 #else
 // Complex single precision floating-point QR Decomposition
 void QRDecomposition(std::vector<ac_complex<float> > &a_matrix,
@@ -134,7 +136,8 @@ int main(int argc, char *argv[]) {
               << std::endl;
 
     // Select a type for this compile depending on the value of COMPLEX
-    using T = std::conditional_t<kComplex, ac_complex<float>, float>;
+    using T = std::conditional_t<kComplex, ac_complex<double>, double>;
+    // using T = std::conditional_t<kComplex, ac_complex<float>, float>;
 
     // Create vectors to hold all the input and output matrices
     std::vector<T> a_matrix;
@@ -232,6 +235,44 @@ int main(int argc, char *argv[]) {
       std::cout << "],\n";
     }
 
+    // Hessenberg trnsform
+    Hess_QR_Decmp<T> hqrd(a_matrix_cpu.data(), kRows);
+    hqrd.hessXform();
+    for(int itr = 0; itr < 2000; itr++){
+      hqrd.hess_qr_rq();
+
+      // convergence test 
+      bool close2zero = 1;
+      T threshold = 1e-5;
+      // check zero thereshold for lower part 
+      for(int i = 0; i < kRows; i++){
+        for(int j = 0; j < i; j++){
+          if(std::fabs(hqrd.matH[i*kRows+j]) > threshold && i > j){
+            // std::cout << "failed at i: " << i << " j: " << j << "\n"; 
+            close2zero = 0;
+            break;
+          }
+          if(!close2zero){
+            break;
+          }
+        }
+      }
+      if(close2zero){
+        std::cout << "Hessenber QR convergence achieved at iter: " << itr << "\n";
+        break;
+      }
+    }
+    std::cout << "\nAfter Hessenberg transfom: \n";
+
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        std::cout << hqrd.matH[i*kRows+j] << ", ";
+      }
+      std::cout << "\n";
+    }
+
+
+
     // std::memcpy(a_matrix_cpu.data(), a_matrix.data(), kAMatrixSize * kMatricesToDecompose*sizeof(T));
     QR_Decmp<T> qrd_cpu(a_matrix_cpu.data(), kRows);
     iter = 10000;
@@ -264,7 +305,7 @@ int main(int argc, char *argv[]) {
 
       // convergence test 
       bool close2zero = 1;
-      const float threshold = 1e-6;
+      const float threshold = 1e-5;
       // check zero thereshold for lower part 
       for(int i = 0; i < kRows; i++){
         for(int j = 0; j < i; j++){
@@ -284,44 +325,6 @@ int main(int argc, char *argv[]) {
       }
     
     }
-
-    // Printig the diff matrix 
-    std::cout << "\nEigen Vectirs from cpu computation(columns): \n";
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        std::cout << eigen_vectors_cpu[i*kRows+j] << " ";
-      }
-      std::cout << "\n";
-    }
-
-    std::cout << "\n\nEigen vectors from SYCL kernel computation(columns): \n";
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        std::cout << qq_matrix[i*kRows+j] << " ";
-      }
-      std::cout << "\n";
-    }
-
-
-    // Floating-point error threshold value at which we decide that the design
-    // computed an incorrect value
-    constexpr float kErrorThresholdQQ = 1e-4;
-    int errorCountQQ = 0;
-     for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        if(fabs(qq_matrix[i*kRows+j] - eigen_vectors_cpu[i*kRows+j]) > kErrorThresholdQQ || 
-            isnan(qq_matrix[i*kRows+j]) || isnan(eigen_vectors_cpu[i*kRows+j])){
-              errorCountQQ++;
-        }
-      }
-    }
-
-    if(errorCountQQ == 0){
-      std::cout << "\nQQ matrix from kernel is maching with CPU based computation\n";
-    } else {
-      std::cout << "\nNumber of QQ matrix mismatch is: " << errorCountQQ << "\n";
-    }
-
 
 
     // Printig the diff matrix 
@@ -344,7 +347,7 @@ int main(int argc, char *argv[]) {
 
     // Floating-point error threshold value at which we decide that the design
     // computed an incorrect value
-    constexpr float kErrorThresholdRQ = 1e-4;
+    constexpr float kErrorThresholdRQ = 1e-5;
     int errorCountRQ = 0;
      for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
@@ -360,6 +363,47 @@ int main(int argc, char *argv[]) {
     } else {
       std::cout << "Number of RQ matrix mismatch is: " << errorCountRQ << "\n";
     }
+
+    // Printig the diff matrix 
+    std::cout << "\nEigen Vectors from cpu computation(columns): \n";
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        std::cout << eigen_vectors_cpu[i*kRows+j] << " ";
+      }
+      std::cout << "\n";
+    }
+
+    std::cout << "\n\nEigen vectors from SYCL kernel computation(columns): \n";
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        std::cout << qq_matrix[i*kRows+j] << " ";
+      }
+      std::cout << "\n";
+    }
+
+
+    // Floating-point error threshold value at which we decide that the design
+    // computed an incorrect value
+    constexpr float kErrorThresholdQQ = 1e-5;
+    int errorCountQQ = 0;
+     for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        if(fabs(qq_matrix[i*kRows+j] - eigen_vectors_cpu[i*kRows+j]) > kErrorThresholdQQ*eigen_vectors_cpu[i*kRows+j] || 
+            isnan(qq_matrix[i*kRows+j]) || isnan(eigen_vectors_cpu[i*kRows+j])){
+              errorCountQQ++;
+        }
+      }
+    }
+
+    if(errorCountQQ == 0){
+      std::cout << "\nQQ matrix from kernel is maching with CPU based computation\n";
+    } else {
+      std::cout << "\nNumber of QQ matrix mismatch is: " << errorCountQQ << "\n";
+    }
+
+
+
+  
 
 
     // // For output post-processing (op)
