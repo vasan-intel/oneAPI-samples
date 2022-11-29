@@ -20,11 +20,16 @@ class Hess_QR_Decmp{
         T *vecU, *vecV, *vecTmp; 
         T *vecC, *vecS;
 
+        // shift value
+        T mu;
+
     public: 
         Hess_QR_Decmp(T *matA_ptr, int n);
         ~Hess_QR_Decmp();
         void hessXform();
-        void hess_qr_rq();
+        void calculateShift(int p);
+        void hess_qr_rq(int p);
+        void do_hess_qr_iteration();
 };
 
 
@@ -127,6 +132,22 @@ void Hess_QR_Decmp<T>::hessXform(){
             }
         }
 
+        // Q computation 
+        // Q[:,j+1:n] -= (Q[:,j+1:n] @ (2*v)) @ np.transpose(v)
+        for(int k = 0; k < n; k++){
+            this->vecTmp[k] = 0;
+            for(int i = j+1; i < n; i++){
+                this->vecTmp[k] += 2*this->matQ[k*n+i]*this->vecV[i];
+            }
+        }
+
+        // updating H
+        for(int k = 0; k < n; k++){
+            for(int i = j+1; i < n; i++){
+                this->matQ[k*n+i] -= this->vecV[i] * this->vecTmp[k]; 
+            }
+        }
+
 
     }
 
@@ -137,14 +158,22 @@ void Hess_QR_Decmp<T>::hessXform(){
         }
     }
 
+    
+
+
 }
 
 
 template<typename T> 
-void Hess_QR_Decmp<T>::hess_qr_rq(){
+void Hess_QR_Decmp<T>::hess_qr_rq( int p){
+
+    // subtracting the shift from the main diagonal 
+    for(int i = 0; i < p; i++){
+        this->matH[i*n+i] -= this->mu; 
+    }
 
     // QR decomposition 
-    for(int j = 0; j < n-1; j++){
+    for(int j = 0; j < p-1; j++){
         T u_0 = this->matH[j*n+j];
         T u_1 = this->matH[(j+1)*n+j];
 
@@ -155,7 +184,7 @@ void Hess_QR_Decmp<T>::hess_qr_rq(){
         this->vecC[j] = c;
         this->vecS[j] = s;
 
-        for(int i = 0; i < n; i++){
+        for(int i = 0; i < p; i++){
             T h_val = c*this->matH[j*n+i] + s*this->matH[(j+1)*n+i];
             T l_val = 0 -s*this->matH[j*n+i] + c*this->matH[(j+1)*n+i];
             this->matH[j*n+i] = h_val;
@@ -164,16 +193,24 @@ void Hess_QR_Decmp<T>::hess_qr_rq(){
     }
 
     // RQ computation 
-    for(int j = 0; j < n-1; j++){
+    for(int j = 0; j < p-1; j++){
 
         T c = this->vecC[j];
         T s = this->vecS[j];
 
-        for(int i = 0; i < n; i++){
+        for(int i = 0; i < p; i++){
             T l_val = this->matH[i*n+j]*c +this->matH[i*n+j+1]*s;
             T r_val = 0-this->matH[i*n+j]*s +this->matH[i*n+j+1]*c;
             this->matH[i*n+j] = l_val;
             this->matH[i*n+j+1] = r_val;
+        }
+
+        // Eigen vector update 
+        for(int i = 0; i < n; i++){
+            T l_val = this->matQ[i*n+j]*c + this->matQ[i*n+j+1]*s;
+            T r_val = 0-this->matQ[i*n+j]*s + this->matQ[i*n+j+1]*c;
+            this->matQ[i*n+j] = l_val;
+            this->matQ[i*n+j+1] = r_val;
         }
     }
 
@@ -183,4 +220,48 @@ void Hess_QR_Decmp<T>::hess_qr_rq(){
             this->matH[i*n+j] = (abs(i-j) > 1 ) ? 0 : this->matH[i*n+j];
         }
     }
+
+    // adding back subtracted mu value
+    // subtracting the shift from the main diagonal 
+    for(int i = 0; i < p; i++){
+        this->matH[i*n+i] += this->mu; 
+    }
+}
+
+
+
+template<typename T> 
+void Hess_QR_Decmp<T>::calculateShift(int p){
+
+    T a = this->matH[(p-1)*n+p-1];
+    T b = this->matH[(p-1)*n+p];
+    T c = this->matH[p*n+ p];
+
+    // computing the wilkinson shift
+    T lamda = (c-a)/2.0;
+    T sign = fabs(lamda) < 1e-6 ? 1 : lamda/fabs(lamda);
+    this->mu = c - (sign *b*b)/(fabs(lamda) + sqrt(lamda*lamda+b*b));
+
+}
+
+
+
+template<typename T> 
+void Hess_QR_Decmp<T>::do_hess_qr_iteration(){
+    T threshold = 1e-6;
+    int counter = 0;
+    for(int p = n-1; p > 0; p--){
+        for(int itr = 0; itr < 100; itr++){
+            counter++;
+            if(fabs(this->matH[p*n+p-1]) < threshold){
+                // std::cout << "converging at itr: " << itr << " for p: " << p << "\n";
+                break;
+            }
+            this->calculateShift(p);
+            this->hess_qr_rq(p+1);
+            
+        }
+    }
+    std::cout << "Converged after: " << counter << " iterations\n";
+
 }

@@ -238,35 +238,46 @@ int main(int argc, char *argv[]) {
     // Hessenberg trnsform
     Hess_QR_Decmp<T> hqrd(a_matrix_cpu.data(), kRows);
     hqrd.hessXform();
-    for(int itr = 0; itr < 2000; itr++){
-      hqrd.hess_qr_rq();
+    hqrd.do_hess_qr_iteration();
+    // for(int itr = 0; itr < 2000; itr++){
+    //   hqrd.hess_qr_rq();
 
-      // convergence test 
-      bool close2zero = 1;
-      T threshold = 1e-5;
-      // check zero thereshold for lower part 
-      for(int i = 0; i < kRows; i++){
-        for(int j = 0; j < i; j++){
-          if(std::fabs(hqrd.matH[i*kRows+j]) > threshold && i > j){
-            // std::cout << "failed at i: " << i << " j: " << j << "\n"; 
-            close2zero = 0;
-            break;
-          }
-          if(!close2zero){
-            break;
-          }
-        }
-      }
-      if(close2zero){
-        std::cout << "Hessenber QR convergence achieved at iter: " << itr << "\n";
-        break;
-      }
-    }
+    //   // convergence test 
+    //   bool close2zero = 1;
+    //   T threshold = 1e-5;
+    //   // check zero thereshold for lower part 
+    //   for(int i = 0; i < kRows; i++){
+    //     for(int j = 0; j < i; j++){
+    //       if(std::fabs(hqrd.matH[i*kRows+j]) > threshold && i > j){
+    //         // std::cout << "failed at i: " << i << " j: " << j << "\n"; 
+    //         close2zero = 0;
+    //         break;
+    //       }
+    //       if(!close2zero){
+    //         break;
+    //       }
+    //     }
+    //   }
+    //   if(close2zero){
+    //     std::cout << "Hessenber QR convergence achieved at iter: " << itr << "\n";
+    //     break;
+    //   }
+    // }
     std::cout << "\nAfter Hessenberg transfom: \n";
 
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
         std::cout << hqrd.matH[i*kRows+j] << ", ";
+      }
+      std::cout << "\n";
+    }
+
+
+    std::cout << "\nQ matrix After Hessenberg transfom: \n";
+
+    for(int i = 0; i < kRows; i++){
+      for(int j = 0; j < kRows; j++){
+        std::cout << hqrd.matQ[i*kRows+j] << ", ";
       }
       std::cout << "\n";
     }
