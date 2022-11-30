@@ -1,5 +1,5 @@
-set(TARGET_NAME qrd)
-set(SOURCE_FILE qrd_demo.cpp)
+set(TARGET_NAME eigSTri)
+set(SOURCE_FILE eigSTri_demo.cpp)
 set(EMULATOR_TARGET ${TARGET_NAME}.fpga_emu)
 set(FPGA_TARGET ${TARGET_NAME}.fpga)
 set(FPGA_EARLY_IMAGE ${TARGET_NAME}_report.a)
