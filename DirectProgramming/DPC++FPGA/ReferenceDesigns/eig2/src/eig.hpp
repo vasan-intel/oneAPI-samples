@@ -229,46 +229,29 @@ struct StreamingQRD {
         });
       }
 
-        TT lamda = (a_wilk-c_wilk)/2.0;
-        TT sign_lamda = (lamda > 0) - (lamda < 0);
-        TT l_shift = c_wilk - (sign_lamda*b_wilk*b_wilk)/(fabs(lamda) + sqrt(lamda * lamda + b_wilk*b_wilk));
+      TT lamda = (a_wilk-c_wilk)/2.0;
+      TT sign_lamda = (lamda > 0) - (lamda < 0);
+      TT l_shift = c_wilk - (sign_lamda*b_wilk*b_wilk)/(fabs(lamda) + sqrt(lamda * lamda + b_wilk*b_wilk));
 
-        R_shift = RELSHIFT ? c_wilk : l_shift;
-        R_shift -= SHIFT_NOISE;
-
-      // PRINTF("R_shift value is: %f\n", R_shift);
-      // R_shift = 0;
-
-
-
-      // ac_int<kIBitSize, false> 
-      // [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
-      // for(int i_row = 0; i_row < rows; i_row++){
-      //   row_tuple QQ_row_write;
-      //   fpga_tools::UnrolledLoop<columns>([&] (auto k){
-      //     QQ_row_write.template get<k>() = (k == i_row) ? 1 : 0;
-      //   });
-      //   QQ_matrix[i_row+1] = QQ_row_write;
-      // }
-
-
-      for(ac_int<kIBitSize, false> i_row = 0; i_row < rows; i_row++){
-          row_tuple QQ_row_read = QQ_matrix[i_row+1];
-          fpga_tools::UnrolledLoop<columns>([&] (auto k){
-            PRINTF("%f ", QQ_row_read.template get<k>());
-          });
-          PRINTF("\n");
-      }
-
-      const int QR_RQ_iterations = 1000;
-      constexpr int kIBitSize_QR_RQ_itr = fpga_tools::BitsForMaxValue<QR_RQ_iterations + 1>() + 1;
-
+      R_shift = RELSHIFT ? c_wilk : l_shift;
+      R_shift -= SHIFT_NOISE;
+  
       // size of Deflated matrix
       int kDM_size = rows;
 
       int converge_itr = 1;
+
+
+      bool QR_iteration_done = 0;
+      const int iterPerEigen = 3;
+      // this implementation assumes fiding eigen each eigen value 
+      // doesn't require no more than iterPerEigen
+      const int QR_RQ_iterations = (rows-1)*iterPerEigen;
+      constexpr int kIBitSize_QR_RQ_itr = fpga_tools::BitsForMaxValue<QR_RQ_iterations + 1>() + 1;
+      
       // Iterative loop for QR and RQ/QQ coputation
       for(ac_int<kIBitSize_QR_RQ_itr, false> itr = 0; itr < QR_RQ_iterations; itr++){
+        // PRINTF("Itr is: %d\n", (int)itr);
 
         // Compute the QR Decomposition
 
@@ -292,7 +275,7 @@ struct StreamingQRD {
         ac_int<kJBitSize, true> j = 0;
 
 
-        [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
+        // [[intel::initiation_interval(1)]]  // NO-FORMAT: Attribute
         [[intel::ivdep(raw_latency)]]       // NO-FORMAT: Attribute
         for (int s = 0; s < kIterations; s++) {
           // Two matrix columns for partial results.
@@ -332,9 +315,7 @@ struct StreamingQRD {
             // matrix A directly from the a_load; col then contains a_j
 
             if (i_gt_0[fanout_bank_idx]) {
-              TT load_val = a_compute[j].template get<k>();
-              col[k] = load_val;
-              // col[k] = (k == j) ? load_val : load_val;
+              col[k] = a_compute[j].template get<k>();
             }
             // Using an else statement makes the compiler throw an
             // inexplicable warning when using non complex types:
@@ -477,9 +458,6 @@ struct StreamingQRD {
         }  // end of s
 
 
-
-
-
         // Eigen vector QQ computation
         row_tuple QQ_write;
         row_tuple QQ_load;
@@ -525,7 +503,7 @@ struct StreamingQRD {
               }
             });
 
-            if(j_ll ==columns - 1){
+            if(j_ll ==columns - 1 && QR_iteration_done == 0){
               QQ_matrix[i_ll] = QQ_write;
             }
 
@@ -572,11 +550,9 @@ struct StreamingQRD {
               c_wilk = sum_RQ;
             }
 
-            
-
             fpga_tools::UnrolledLoop<columns> ([&] (auto k){
               bool cmp = (k==j_ll && j_ll < kDM_size && i_ll < kDM_size);
-              if(cmp){
+              if(cmp && QR_iteration_done == 0){
                 a_load[i_ll].template get<k>() = sum_RQ;
               }
             });
@@ -584,7 +560,6 @@ struct StreamingQRD {
         }
 
         int itr_i = itr;
-        PRINTF("New shift at iteration:%d value is: %.6f kDM_size:%d\n", itr_i, R_shift, (int)kDM_size);
 
         TT lamda = (a_wilk-c_wilk)/2.0;
         TT sign_lamda = (lamda > 0) - (lamda < 0);
@@ -593,11 +568,10 @@ struct StreamingQRD {
         R_shift = RELSHIFT ? c_wilk : l_shift;
 
         if(converged && kDM_size == KDEFLIM){
-          converge_itr = itr;
-          // PRINTF("Converged at iteration: %d\n", converge_itr);
-          break;
-        } else if(converged){
-
+          QR_iteration_done = 1;
+        }  
+        
+        if(converged){
           TT lamda = (d_wilk-a_wilk)/2.0;
           TT sign_lamda = (lamda > 0) - (lamda < 0);
           TT h_shift = RELSHIFT ? a_wilk : a_wilk - (sign_lamda*e_wilk*e_wilk)/(fabs(lamda) + sqrt(lamda * lamda + e_wilk*e_wilk));
@@ -613,14 +587,6 @@ struct StreamingQRD {
 
       } // End iterative loop
 
-
-      // for(ac_int<kIBitSize, false> i_row = 0; i_row < rows; i_row++){
-      //     row_tuple QQ_row_read = q_result[i_row];
-      //     fpga_tools::UnrolledLoop<columns>([&] (auto k){
-      //       PRINTF("%f ", QQ_row_read.template get<k>());
-      //     });
-      //     PRINTF("\n");
-      //  }
 
       // writing out eigen vector matrix QQ row by row 
       // Eigen vectors are the columns of this matrix 

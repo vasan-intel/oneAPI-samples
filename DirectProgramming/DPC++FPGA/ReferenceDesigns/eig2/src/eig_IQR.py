@@ -17,7 +17,7 @@ N = int(math.sqrt(len(C)))
 print('size of the array is: ' + str(N))
 
 C =np.array(C).reshape(N,N)
-C = C.astype('float32')
+C = C.astype('float64')
 
 w,v = np.linalg.eig(C)
 w_abs =np.array([abs(w[i]) for i in range(w.shape[0])])
