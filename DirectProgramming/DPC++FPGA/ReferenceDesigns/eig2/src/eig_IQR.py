@@ -14,7 +14,7 @@ with open('../build/mat_A.txt', 'r') as infile:
     C = [float(i) for i in mat_A.split(',') if mat_A.strip()]
 
 N = int(math.sqrt(len(C)))
-print('size of the array is: ' + str(N))
+print('Python: size of the array is: ' + str(N))
 
 C =np.array(C).reshape(N,N)
 C = C.astype('float64')
@@ -26,11 +26,11 @@ w = w[w_sort_index]
 v = np.transpose(v)
 v = v[w_sort_index]
 
-print("\nnumpy eigen values ")
-print(w)
+# print("\nnumpy eigen values ")
+# print(w)
 
-print("\nnumpy eigen vectors")
-print(v)
+# print("\nnumpy eigen vectors")
+# print(v)
 
 
 

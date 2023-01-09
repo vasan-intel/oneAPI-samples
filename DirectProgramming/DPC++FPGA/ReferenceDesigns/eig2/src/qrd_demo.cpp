@@ -104,9 +104,8 @@ int main(int argc, char *argv[]) {
   constexpr size_t kRows = ROWS_COMPONENT;
   constexpr size_t kColumns = COLS_COMPONENT;
   constexpr size_t kAMatrixSize = kRows * kColumns;
-  constexpr size_t kQMatrixSize = kRows * kColumns;
-  constexpr size_t kRMatrixSize = kRows * kColumns;
-  constexpr size_t kQRMatrixSize = kQMatrixSize + kRMatrixSize;
+  constexpr size_t kRQMatrixSize = kRows * kColumns;
+  constexpr size_t kQQMatrixSize = kRows * kColumns;
   constexpr bool kComplex = COMPLEX != 0;
 
   int iter = 10000;
@@ -158,8 +157,8 @@ int main(int argc, char *argv[]) {
     std::vector<T> qq_matrix;
 
     a_matrix.resize(kAMatrixSize * kMatricesToDecompose);
-    rq_matrix.resize(kQMatrixSize * kMatricesToDecompose);
-    qq_matrix.resize(kRMatrixSize * kMatricesToDecompose);
+    rq_matrix.resize(kRQMatrixSize * kMatricesToDecompose);
+    qq_matrix.resize(kQQMatrixSize * kMatricesToDecompose);
 
     std::cout << "Generating " << kMatricesToDecompose << " random ";
     if constexpr (kComplex) {
@@ -215,263 +214,269 @@ int main(int argc, char *argv[]) {
                                                                   repetitions);
 
     // eigen value & vector computation on CPU for same data
-    std::vector<T> a_matrix_cpu;
-    std::vector<T> eigen_vectors_cpu;
-    std::vector<T> TmpRow;
-
-    a_matrix_cpu.resize(kAMatrixSize * kMatricesToDecompose);
-    eigen_vectors_cpu.resize(kAMatrixSize * kMatricesToDecompose);
-    TmpRow.resize(kRows);
-
+    std::vector<T> a_matrix_cpu(kAMatrixSize * kMatricesToDecompose);
+    std::vector<T> eigen_vectors_cpu(kAMatrixSize * kMatricesToDecompose);
+    std::vector<T> TmpRow(kRows);
     std::vector<int> sIndex(kRows);
 
+    // data strucutre for golden results from numpy 
+    std::vector<T> py_w(kRows*kMatricesToDecompose);
+    std::vector<T> py_V(kRows*kRows*kMatricesToDecompose);
 
-    std::vector<T> py_w(kRows);
-    std::vector<T> py_V(kRows*kRows);
 
-    // copy A matrix to CPU data
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        a_matrix_cpu[i*kRows+j] = a_matrix[j*kRows+i];
+
+    // copying input matrix and initial eigen vectors for
+    // CPU based computation 
+    for(int matrix_index = 0; matrix_index <kMatricesToDecompose; matrix_index++){
+      int matrix_offset = matrix_index * kAMatrixSize;
+      int evec_offset = kRows * kAMatrixSize;
+
+      // copy A matrix to CPU data
+      // column major to row major conversion 
+      for(int i = 0; i < kRows; i++){
+        for(int j = 0; j < kRows; j++){
+          a_matrix_cpu[matrix_offset+ i*kRows+j] = a_matrix[matrix_offset+ j*kRows+i];
+        }
+      }
+
+      //initialize the eigen vectors to identity mtrix
+      for(int i = 0; i < kRows; i++){
+        for(int j = 0; j < kRows; j++){
+          eigen_vectors_cpu[matrix_offset + i*kRows+j] = (i == j) ? 1 : 0;
+        }
+      }
+
+
+      // Writing the input matrix to a file
+      // python script will read the file and process
+      std::ofstream osA("mat_A.txt");
+      for(int i = 0; i < kRows; i++){
+        for(int j = 0; j < kRows; j++){
+          osA << std::setprecision(15) << a_matrix[matrix_offset+j*kRows+i];
+          if(j != kRows-1 || i != kRows-1){
+            osA << ",";
+          }
+        }
+      }
+      osA.close();
+
+      // executing the python script 
+      if(system("python2 ../src/eig_IQR.py") != 0){
+        std::cout << "Error occured when trying to execute the python script\n";
+      }
+
+      // reading back golden results: eigen values 
+      std::ifstream osW("mat_W.txt");
+      for(int i = 0; i < kRows; i++){
+        osW >> py_w[i+evec_offset];
+      }
+      osW.close();
+
+      // reading back golden results
+      std::ifstream osV("mat_V.txt");  
+      for(int i = 0; i < kRows; i++){
+        for(int j = 0; j < kRows; j++){
+          osV >> py_V[matrix_offset+i*kRows+j];
+        }
+      }
+      osV.close();
+    }
+
+
+////////////////////////////////////////////////////////////////
+////////  QRD Iteration ////////////////////////////////////////
+////////////////////////////////////////////////////////////////
+
+    T *R, *Q; // pointerfor Q and R matrix after QR decomposition 
+    for(int matrix_index = 0; matrix_index <kMatricesToDecompose; matrix_index++){
+      int matrix_offset = matrix_index * kAMatrixSize;
+      // QR decomposition on CPU 
+      QR_Decmp<T> qrd_cpu(&a_matrix_cpu[matrix_offset], kRows);
+      iter = 10000;
+      int kP = kRows;
+      for(int li = 0; li < iter; li++){
+
+        // Wilkinson shift computation 
+        T a_wilk = a_matrix_cpu[matrix_offset+(kP-2)*kRows+kP-2];
+        T b_wilk = a_matrix_cpu[matrix_offset+(kP-1)*kRows+kP-2];
+        T c_wilk = a_matrix_cpu[matrix_offset+(kP-1)*kRows+kP-1];
+
+        T lamda = (a_wilk - c_wilk)/2.0;
+        T sign_lamda = (lamda > 0) - (lamda < 0);
+
+        T shift = RELSHIFT ? c_wilk : c_wilk - (sign_lamda*b_wilk*b_wilk)/(fabs(lamda) + sqrt(lamda * lamda + b_wilk*b_wilk));
+        shift -= SHIFT_NOISE;
+
+        for(int i = 0; i < kP; i++){
+          a_matrix_cpu[matrix_offset+i*kRows+i] -= shift;
+        }
+
+        qrd_cpu.QR_decompose(kP);
+        R = qrd_cpu.get_R();
+        Q = qrd_cpu.get_Q();
+        // RQ computation and updating A 
+        for(int i = 0; i < kP; i++){
+          for(int j = 0; j < kP; j++){
+            a_matrix_cpu[matrix_offset+i*kRows+j] = 0;
+            for(int k = 0; k < kP; k++){
+              a_matrix_cpu[matrix_offset+i*kRows+j] += R[matrix_offset+i*kRows+k]*Q[matrix_offset+k*kRows+j];
+            }
+          }
+        }
+
+        // adding back the shift from the matrix
+        for(int i = 0; i < kP; i++){
+          a_matrix_cpu[matrix_offset+i*kRows+i] += shift;
+        }
+
+        // Eigen vector accumulation 
+        for(int i = 0; i < kRows; i++){
+          std::fill(TmpRow.begin(), TmpRow.end(), 0);
+          for(int j = 0; j < kRows; j++){
+            for(int k = 0; k < kRows; k++){
+              T I_val = (k==j) ? 1 : 0;
+              T q_val = (j >= kP || k >= kP) ? I_val : Q[k*kRows+j];
+              TmpRow[j] += eigen_vectors_cpu[i*kRows+k]*q_val;
+            }
+          }
+          for(int k = 0; k < kRows; k++) eigen_vectors_cpu[i*kRows+k] = TmpRow[k];
+        }
+
+        // convergence test 
+        bool close2zero = 1;
+
+        // check zero thereshold for lower part 
+        for(int j = 0; j < kP-1; j++){
+          if(std::fabs(a_matrix_cpu[matrix_offset + (kP-1)*kRows+j]) > KTHRESHOLD){
+            // std::cout << "failed at i: " << i << " j: " << j << "\n"; 
+            close2zero = 0;
+            break;
+          }
+        }
+
+        if(close2zero && kP == KDEFLIM){
+          std::cout << "CPU convergence achieved at iter: " << li << "\n";
+          break;
+        } else if(close2zero){
+          kP -= 1;
+        }
+      
       }
     }
 
-    //initialize the eigen vectors to identity mtrix
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        eigen_vectors_cpu[i*kRows+j] = (i == j) ? 1 : 0;
-      }
-    }
+
+/////////////////////////////////////////////////////////////////////
+///////////////////////// Sorting and matching with golden value ///
+/////////////////////////////////////////////////////////////////////
+
+  for(int matrix_index = 0; matrix_index <kMatricesToDecompose; matrix_index++){
+    int matrix_offset = matrix_index * kAMatrixSize;
+    int evec_offset = kRows * kAMatrixSize;
+
 
     // Initialize the idexes for sorting 
+    // the eigen values. Pyhton implmentation
+    // could use different algorithm, hence 
+    // the order of eigen values might be different 
     for(int i = 0; i < kRows; i++){
       sIndex[i] = i;
     }
 
-
-     // Printig the diff matrix 
-    std::ofstream osA("mat_A.txt");
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        osA << std::setprecision(15) << a_matrix[j*kRows+i];
-        if(j != kRows-1 || i != kRows-1){
-          osA << ",";
-        }
-      }
-    }
-    osA.close();
-
-    if(system("python2 ../src/eig_IQR.py") != 0){
-      std::cout << "Error occured when trying to execute the python script\n";
-    }
-
-    // reading back golden results
-    std::ifstream osW("mat_W.txt");
-    for(int i = 0; i < kRows; i++){
-      osW >> py_w[i];
-    }
-    osW.close();
-
-    // reading back golden results
-    std::ifstream osV("mat_V.txt");  
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        osV >> py_V[i*kRows+j];
-      }
-    }
-    osV.close();
-
-
-    std::cout << "\n last element is: " << a_matrix_cpu[(kRows-1)*kRows + kRows-1] << "\n";
-
-    // std::memcpy(a_matrix_cpu.data(), a_matrix.data(), kAMatrixSize * kMatricesToDecompose*sizeof(T));
-    QR_Decmp<T> qrd_cpu(a_matrix_cpu.data(), kRows);
-    // QR_Decmp<T> qrd_cpu(data, kRows);
-    iter = 10000;
-    int kP = kRows;
-    T *R, *Q;
-    for(int li = 0; li < iter; li++){
-
-      T a_wilk = a_matrix_cpu[(kP-2)*kRows+kP-2];
-      T b_wilk = a_matrix_cpu[(kP-1)*kRows+kP-2];
-      T c_wilk = a_matrix_cpu[(kP-1)*kRows+kP-1];
-
-      T lamda = (a_wilk - c_wilk)/2.0;
-      T sign_lamda = (lamda > 0) - (lamda < 0);
-
-      T shift = RELSHIFT ? c_wilk : c_wilk - (sign_lamda*b_wilk*b_wilk)/(fabs(lamda) + sqrt(lamda * lamda + b_wilk*b_wilk));
-      shift -= SHIFT_NOISE;
-      std::cout << "Shift value at iteration: " << li << " is:" << shift << " kP=" << kP << "\n";
-
-      // T shift = a_matrix_cpu[(kP-1)*kRows+kP-1];
-      // subtracting the shift from the matrix
-      for(int i = 0; i < kP; i++){
-        a_matrix_cpu[i*kRows+i] -= shift;
-      }
-
-      qrd_cpu.QR_decompose(kP);
-      R = qrd_cpu.get_R();
-      Q = qrd_cpu.get_Q();
-      // RQ computation and updating A 
-      for(int i = 0; i < kP; i++){
-        for(int j = 0; j < kP; j++){
-          a_matrix_cpu[i*kRows+j] = 0;
-          for(int k = 0; k < kP; k++){
-            a_matrix_cpu[i*kRows+j] += R[i*kRows+k]*Q[k*kRows+j];
-          }
-        }
-      }
-
-      // adding back the shift from the matrix
-      for(int i = 0; i < kP; i++){
-        a_matrix_cpu[i*kRows+i] += shift;
-      }
-
-      // Eigen vector accumulation 
-      for(int i = 0; i < kRows; i++){
-        std::fill(TmpRow.begin(), TmpRow.end(), 0);
-        for(int j = 0; j < kRows; j++){
-          for(int k = 0; k < kRows; k++){
-            T I_val = (k==j) ? 1 : 0;
-            T q_val = (j >= kP || k >= kP) ? I_val : Q[k*kRows+j];
-            TmpRow[j] += eigen_vectors_cpu[i*kRows+k]*q_val;
-          }
-        }
-        for(int k = 0; k < kRows; k++) eigen_vectors_cpu[i*kRows+k] = TmpRow[k];
-      }
-
-
-
-      // convergence test 
-      bool close2zero = 1;
-      // const float threshold = KTHRESHOLD;
-      // check zero thereshold for lower part 
-
-      for(int j = 0; j < kP-1; j++){
-        if(std::fabs(a_matrix_cpu[(kP-1)*kRows+j]) > KTHRESHOLD){
-          // std::cout << "failed at i: " << i << " j: " << j << "\n"; 
-          close2zero = 0;
-          break;
-        }
-      }
-
-
-      // std::cout << "CPU Iteration: " << li << " kP: " << kP << "\n";
-      // if(li == 15){
-      //   break;
-      // }
-
-      if(close2zero && kP == KDEFLIM){
-        std::cout << "CPU convergence achieved at iter: " << li << "\n";
-        break;
-      } else if(close2zero){
-        // for(int j = 0; j < kP-1; j++){
-        //   a_matrix_cpu[(kP-1)*kRows+j] = 0;
-        //   a_matrix_cpu[j*kRows+(kP-1)] = 0;
-        // }
-        kP -= 1;
-      }
-    
-    }
-
-
     // sorting the eigen values 
-    std::sort(sIndex.begin(), sIndex.end(), [=](int a, int b){ return fabs(a_matrix_cpu[a*kRows+a]) > fabs(a_matrix_cpu[b*kRows+b]);});
-
-    std::cout << "\nR matrix from cpu computation: \n";
-    for(int i = 0; i < kP; i++){
-      for(int j = 0; j < kP; j++){
-        std::cout << R[i*kRows+j] << " ";
-      }
-      std::cout << "\n";
-    }
-
-    std::cout << "\nQ matrix from cpu computation: \n";
-    for(int i = 0; i < kP; i++){
-      for(int j = 0; j < kP; j++){
-        std::cout << Q[i*kRows+j] << " ";
-      }
-      std::cout << "\n";
-    }
-
+    std::sort(sIndex.begin(), sIndex.end(), [=](int a, int b) \
+      { return fabs(a_matrix_cpu[matrix_offset+a*kRows+a]) > fabs(a_matrix_cpu[matrix_offset+b*kRows+b]);});
 
     // Printig the diff matrix 
-    std::cout << "\nRQ matrix from cpu computation: \n";
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        std::cout << a_matrix_cpu[i*kRows+j] << " ";
-      }
-      std::cout << "\n";
-    }
+    // std::cout << "\nRQ matrix from cpu computation: \n";
+    // for(int i = 0; i < kRows; i++){
+    //   for(int j = 0; j < kRows; j++){
+    //     std::cout << a_matrix_cpu[i*kRows+j] << " ";
+    //   }
+    //   std::cout << "\n";
+    // }
 
-    std::cout << "\n\nRQ matrix from SYCL kernel computation: \n";
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        std::cout << rq_matrix[j*kRows+i] << " ";
-      }
-      std::cout << "\n";
-    }
+    // std::cout << "\n\nRQ matrix from SYCL kernel computation: \n";
+    // for(int i = 0; i < kRows; i++){
+    //   for(int j = 0; j < kRows; j++){
+    //     std::cout << rq_matrix[j*kRows+i] << " ";
+    //   }
+    //   std::cout << "\n";
+    // }
 
     T diff_threshold = KETHRESHOLD;
-    int rq_ecount = 0;
+    int rq_ecount_SYCL = 0;
+    int rq_ecount_CPP = 0;
     for(int i = 0; i < kRows; i++){
-      if(fabs(fabs(a_matrix_cpu[i*kRows+i]) - fabs(rq_matrix[i*kRows+i])) > diff_threshold 
-      || isnan(rq_matrix[i*kRows+i]) || isnan(a_matrix_cpu[i*kRows+i])){
-        rq_ecount++;
-        std::cout << "Mis matched values are: " << a_matrix_cpu[i*kRows+i] << ", " << rq_matrix[i*kRows+i] << " at i: " << i << "\n";
+      int sI = sIndex[i];
+      if(fabs(fabs(py_w[evec_offset+i]) - fabs(rq_matrix[matrix_offset + sI*kRows+sI])) > diff_threshold 
+      || isnan(py_w[evec_offset+i]) || isnan(rq_matrix[matrix_offset + sI*kRows+sI])){
+        rq_ecount_SYCL++;
+        std::cout << "Mis matched values are: " << py_w[evec_offset+i] \
+        << ", " << rq_matrix[matrix_offset+i*kRows+i] << " at i: " << i << "\n";
+      }
+
+      if(fabs(fabs(py_w[evec_offset+i]) - fabs(a_matrix_cpu[matrix_offset + sI*kRows+sI])) > diff_threshold 
+      || isnan(py_w[evec_offset+i]) || isnan(a_matrix_cpu[matrix_offset + sI*kRows+sI])){
+        rq_ecount_CPP++;
       }
     }
 
-    if(rq_ecount == 0){
-      std::cout << "\n\npassed:  CPU eigen values and Kernel Eigen values are matched\n\n";
+    if(rq_ecount_SYCL == 0){
+      std::cout << "\nMatrix: " << matrix_index << " passed:  Kernel eigen values and numpy values are matched\n";
     } else {
-      std::cout << "Mismatch is found between CPU RQ and Kernel RQ\n";
+      std::cout << "\nMatrix: " << matrix_index << " Mismatch is found between kernel and numpy eigen values, Mismatch count: " \
+       << rq_ecount_SYCL << "\n";
+    }
+
+    if(rq_ecount_CPP == 0){
+      std::cout << "Matrix: " << matrix_index << " passed:  CPU eigen values and numpy values are matched\n";
+    } else {
+      std::cout << "Matrix: " << matrix_index << " Mismatch is found between CPU and numpy eigen values, Mismatch count: " \
+       << rq_ecount_CPP << "\n";
     }
 
 
-    // Printig the diff matrix 
-    std::cout << "\nEigen Vectors from cpu computation(columns): \n";
+    // // Printig the diff matrix 
+    // std::cout << "\nEigen Vectors from cpu computation(columns): \n";
+    // for(int i = 0; i < kRows; i++){
+    //   for(int j = 0; j < kRows; j++){
+    //     std::cout << eigen_vectors_cpu[j*kRows+sIndex[i]] << " ";
+    //   }
+    //   std::cout << "\n";
+    // }
+
+    // std::cout << "\n\nEigen vectors from SYCL kernel computation(columns): \n";
+    // for(int i = 0; i < kRows; i++){
+    //   for(int j = 0; j < kRows; j++){
+    //     std::cout << qq_matrix[j*kRows+sIndex[i]] << " ";
+    //   }
+    //   std::cout << "\n";
+    // }
+
+    double sq_error_cpp = 0, sq_error_SYCL = 0;
+  // std::cout << "\n\nEigen vectors from python numpy: \n";
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
-        std::cout << eigen_vectors_cpu[j*kRows+sIndex[i]] << " ";
-      }
-      std::cout << "\n";
-    }
+        // std::cout << py_V[i*kRows+j] << " ";
+        sq_error_cpp += (fabs(eigen_vectors_cpu[matrix_offset+ j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+ i*kRows+j])) * \
+                          (fabs(eigen_vectors_cpu[ matrix_offset+ j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+i*kRows+j]));
 
-    std::cout << "\n\nEigen vectors from SYCL kernel computation(columns): \n";
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        std::cout << qq_matrix[j*kRows+sIndex[i]] << " ";
+        sq_error_SYCL += (fabs(qq_matrix[matrix_offset+j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+i*kRows+j])) * \
+                  (fabs(qq_matrix[matrix_offset+j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+i*kRows+j]));
       }
-      std::cout << "\n";
-    }
-
-  double sq_error_cpp = 0, sq_error_SYCL = 0;
-  std::cout << "\n\nEigen vectors from python numpy: \n";
-    for(int i = 0; i < kRows; i++){
-      for(int j = 0; j < kRows; j++){
-        std::cout << py_V[i*kRows+j] << " ";
-        sq_error_cpp += (fabs(eigen_vectors_cpu[j*kRows+sIndex[i]]) - fabs(py_V[i*kRows+j])) * \
-                          (fabs(eigen_vectors_cpu[j*kRows+sIndex[i]]) - fabs(py_V[i*kRows+j]));
-
-        sq_error_SYCL += (fabs(qq_matrix[j*kRows+sIndex[i]]) - fabs(py_V[i*kRows+j])) * \
-                  (fabs(qq_matrix[j*kRows+sIndex[i]]) - fabs(py_V[i*kRows+j]));
-      }
-      std::cout << "\n";
+      // std::cout << "\n";
     }
 
 
-    std::cout << "\n\nNumpy-CPP ABS square error sum is: " << sq_error_cpp << "\n";
-    std::cout << "Numpy-SYCL ABS square error sum is: " << sq_error_SYCL << "\n\n";
+    std::cout << "\n\n" << "Matrix: " << matrix_index << " Numpy-CPP ABS square error sum is: " << sq_error_cpp << "\n";
+    std::cout << "Matrix: " << matrix_index << " Numpy-SYCL ABS square error sum is: " << sq_error_SYCL << "\n\n";
 
     int qq_ecountCPP = 0;
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
-        if(fabs(fabs(py_V[i*kRows+j]) - fabs(eigen_vectors_cpu[j*kRows+sIndex[i]])) > diff_threshold 
-        || isnan(eigen_vectors_cpu[j*kRows+sIndex[i]]) || isnan(py_V[i*kRows+j])){
+        if(fabs(fabs(py_V[matrix_offset + i*kRows+j]) - fabs(eigen_vectors_cpu[matrix_offset + j*kRows+sIndex[i]])) > diff_threshold 
+        || isnan(eigen_vectors_cpu[matrix_offset + j*kRows+sIndex[i]]) || isnan(py_V[matrix_offset + i*kRows+j])){
           qq_ecountCPP++;
-          // std::cout << "Mis matched values are: " << py_V[i*kRows+j] << ", " << eigen_vectors_cpu[i*kRows+sIndex[j]] << " at i,j:"
-          //  << i << "," << j << "\n";
         }
       }
     }
@@ -479,27 +484,34 @@ int main(int argc, char *argv[]) {
     int qq_ecountSYCL = 0;
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
-        if(fabs(fabs(py_V[i*kRows+j]) - fabs(qq_matrix[j*kRows+sIndex[i]])) > diff_threshold 
-        || isnan(qq_matrix[j*kRows+sIndex[i]]) || isnan(py_V[i*kRows+j])){
+        if(fabs(fabs(py_V[matrix_offset + i*kRows+j]) - fabs(qq_matrix[matrix_offset + j*kRows+sIndex[i]])) > diff_threshold 
+        || isnan(qq_matrix[matrix_offset + j*kRows+sIndex[i]]) || isnan(py_V[matrix_offset + i*kRows+j])){
           qq_ecountSYCL++;
-          std::cout << "Mis matched values are: " << py_V[i*kRows+j] << ", " << qq_matrix[j*kRows+sIndex[i]] << "," << eigen_vectors_cpu[j*kRows+sIndex[i]] << " at i,j:"
-           << i << "," << j << "\n";
+          // std::cout << "Mis matched values are: " << py_V[i*kRows+j] << ", " << qq_matrix[j*kRows+sIndex[i]] << "," << eigen_vectors_cpu[j*kRows+sIndex[i]] << " at i,j:"
+          //  << i << "," << j << "\n";
         }
       }
     }
+ 
 
 
     if(qq_ecountCPP == 0){
-      std::cout << "\n\npassed:  CPU eigen vectors and numpy Eigen vectors are matched\n\n";
+      std::cout << "\nMatrix: " << matrix_index \
+      << " passed:  CPU eigen vectors and numpy Eigen vectors are matched\n";
     } else {
-      std::cout << "\n\n Error: Mismatch is found between CPU QQ and nump QQ, count: " << qq_ecountCPP << "\n\n";
+      std::cout << "\nMatrix: " << matrix_index \
+      << "  Error: Mismatch is found between CPU QQ and nump QQ, count: " << qq_ecountCPP << "\n";
     }
 
     if(qq_ecountSYCL == 0){
-      std::cout << "\n\npassed:  SYCL and numpy Eigen vectors are matched\n\n";
+      std::cout << "Matrix: " << matrix_index \
+      << " passed:  SYCL and numpy Eigen vectors are matched\n";
     } else {
-      std::cout << "\n\n Error: Mismatch is found between SYCL and numpy QQ, count: " << qq_ecountSYCL << "\n\n";
+      std::cout  << "Matrix: " << matrix_index \
+      << "  Error: Mismatch is found between SYCL and numpy QQ, count: " << qq_ecountSYCL << "\n";
     }
+
+  }
 
 
     // std::cout << std::endl << "PASSED" << std::endl;
@@ -525,7 +537,7 @@ int main(int argc, char *argv[]) {
                  "running the executable."
               << std::endl;
     std::cerr << "   In this run, more than "
-              << ((kAMatrixSize + kQRMatrixSize) * 2 * kMatricesToDecompose
+              << ((kAMatrixSize *3) * 2 * kMatricesToDecompose
                  * sizeof(float)) / pow(2, 30)
               << " GBs of memory was requested for the decomposition of a "
               << "matrix of size " << kRows << " x " << kColumns

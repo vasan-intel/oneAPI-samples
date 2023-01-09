@@ -73,7 +73,7 @@ template<typename T> void  QR_Decmp<T>::initializeI0(int p){
     this->matIR[0] = 1.0/sqrt(this->matP[0]);
     this->matR[0] = sqrt(this->matP[0]);
 
-    std::cout << "this->matP[0]: " << this->matP[0] << "\n";
+    // std::cout << "this->matP[0]: " << this->matP[0] << "\n";
 
     for(int j = 1; j < p; j++){
         this->matP[j] = this->dotA(0,j, p);
