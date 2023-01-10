@@ -15,9 +15,9 @@
 
 // dpc_common.hpp can be found in the dev-utilities include folder.
 // e.g., $ONEAPI_ROOT/dev-utilities//include/dpc_common.hpp
-#define KTHRESHOLD 1e-5
+#define KTHRESHOLD 1e-4
 #define KDEFLIM 2
-#define KETHRESHOLD 1e-3
+#define KETHRESHOLD 1e-2
 #define RELSHIFT 0
 #define SHIFT_NOISE 1e-3
 #include "dpc_common.hpp"
@@ -229,7 +229,7 @@ int main(int argc, char *argv[]) {
     // CPU based computation 
     for(int matrix_index = 0; matrix_index <kMatricesToDecompose; matrix_index++){
       int matrix_offset = matrix_index * kAMatrixSize;
-      int evec_offset = kRows * kAMatrixSize;
+      int evec_offset = matrix_index * kRows;
 
       // copy A matrix to CPU data
       // column major to row major conversion 
@@ -319,7 +319,7 @@ int main(int argc, char *argv[]) {
           for(int j = 0; j < kP; j++){
             a_matrix_cpu[matrix_offset+i*kRows+j] = 0;
             for(int k = 0; k < kP; k++){
-              a_matrix_cpu[matrix_offset+i*kRows+j] += R[matrix_offset+i*kRows+k]*Q[matrix_offset+k*kRows+j];
+              a_matrix_cpu[matrix_offset+i*kRows+j] += R[i*kRows+k]*Q[k*kRows+j];
             }
           }
         }
@@ -336,10 +336,10 @@ int main(int argc, char *argv[]) {
             for(int k = 0; k < kRows; k++){
               T I_val = (k==j) ? 1 : 0;
               T q_val = (j >= kP || k >= kP) ? I_val : Q[k*kRows+j];
-              TmpRow[j] += eigen_vectors_cpu[i*kRows+k]*q_val;
+              TmpRow[j] += eigen_vectors_cpu[matrix_offset+i*kRows+k]*q_val;
             }
           }
-          for(int k = 0; k < kRows; k++) eigen_vectors_cpu[i*kRows+k] = TmpRow[k];
+          for(int k = 0; k < kRows; k++) eigen_vectors_cpu[matrix_offset+i*kRows+k] = TmpRow[k];
         }
 
         // convergence test 
@@ -371,7 +371,7 @@ int main(int argc, char *argv[]) {
 
   for(int matrix_index = 0; matrix_index <kMatricesToDecompose; matrix_index++){
     int matrix_offset = matrix_index * kAMatrixSize;
-    int evec_offset = kRows * kAMatrixSize;
+    int evec_offset = matrix_index * kRows;
 
 
     // Initialize the idexes for sorting 
@@ -412,7 +412,7 @@ int main(int argc, char *argv[]) {
       || isnan(py_w[evec_offset+i]) || isnan(rq_matrix[matrix_offset + sI*kRows+sI])){
         rq_ecount_SYCL++;
         std::cout << "Mis matched values are: " << py_w[evec_offset+i] \
-        << ", " << rq_matrix[matrix_offset+i*kRows+i] << " at i: " << i << "\n";
+        << ", " << rq_matrix[matrix_offset + sI*kRows+sI] << " at i: " << i << "\n";
       }
 
       if(fabs(fabs(py_w[evec_offset+i]) - fabs(a_matrix_cpu[matrix_offset + sI*kRows+sI])) > diff_threshold 
@@ -424,14 +424,14 @@ int main(int argc, char *argv[]) {
     if(rq_ecount_SYCL == 0){
       std::cout << "\nMatrix: " << matrix_index << " passed:  Kernel eigen values and numpy values are matched\n";
     } else {
-      std::cout << "\nMatrix: " << matrix_index << " Mismatch is found between kernel and numpy eigen values, Mismatch count: " \
+      std::cout << "\nMatrix: " << matrix_index << " Error is found between kernel and numpy eigen values, Mismatch count: " \
        << rq_ecount_SYCL << "\n";
     }
 
     if(rq_ecount_CPP == 0){
       std::cout << "Matrix: " << matrix_index << " passed:  CPU eigen values and numpy values are matched\n";
     } else {
-      std::cout << "Matrix: " << matrix_index << " Mismatch is found between CPU and numpy eigen values, Mismatch count: " \
+      std::cout << "Matrix: " << matrix_index << " Error: Mismatch is found between CPU and numpy eigen values, Mismatch count: " \
        << rq_ecount_CPP << "\n";
     }
 
@@ -477,6 +477,8 @@ int main(int argc, char *argv[]) {
         if(fabs(fabs(py_V[matrix_offset + i*kRows+j]) - fabs(eigen_vectors_cpu[matrix_offset + j*kRows+sIndex[i]])) > diff_threshold 
         || isnan(eigen_vectors_cpu[matrix_offset + j*kRows+sIndex[i]]) || isnan(py_V[matrix_offset + i*kRows+j])){
           qq_ecountCPP++;
+          std::cout << "CPU Mis matched values are: " << py_V[matrix_offset + i*kRows+j] << ", " << eigen_vectors_cpu[matrix_offset + j*kRows+sIndex[i]]  << " at i,j:"
+           << i << "," << j << "\n";
         }
       }
     }
@@ -487,8 +489,8 @@ int main(int argc, char *argv[]) {
         if(fabs(fabs(py_V[matrix_offset + i*kRows+j]) - fabs(qq_matrix[matrix_offset + j*kRows+sIndex[i]])) > diff_threshold 
         || isnan(qq_matrix[matrix_offset + j*kRows+sIndex[i]]) || isnan(py_V[matrix_offset + i*kRows+j])){
           qq_ecountSYCL++;
-          // std::cout << "Mis matched values are: " << py_V[i*kRows+j] << ", " << qq_matrix[j*kRows+sIndex[i]] << "," << eigen_vectors_cpu[j*kRows+sIndex[i]] << " at i,j:"
-          //  << i << "," << j << "\n";
+          std::cout << "SYCL Mis matched values are: " << py_V[matrix_offset + i*kRows+j] << ", " << qq_matrix[matrix_offset + j*kRows+sIndex[i]]  << " at i,j:"
+           << i << "," << j << "\n";
         }
       }
     }

@@ -280,6 +280,7 @@ struct StreamingQRD {
         for (int s = 0; s < kIterations; s++) {
           // Two matrix columns for partial results.
           TT col[rows];
+          TT col_dummy[rows];
           TT col1[rows];
 
           // Current value of s_or_ir depending on the value of j
@@ -304,6 +305,8 @@ struct StreamingQRD {
           // Preload col and a_i with the correct data for the current iteration
           // These are going to be use to compute the dot product of two
           // different columns of the input matrix.
+
+          TT diag_val = 0;
           fpga_tools::UnrolledLoop<rows>([&](auto k) {
             // find which fanout bank this unrolled iteration is going to use
             constexpr auto fanout_bank_idx = k / kFanoutReduction;
@@ -324,9 +327,28 @@ struct StreamingQRD {
             if (!i_gt_0[fanout_bank_idx]) {
               // supporting matrix deflation
               TT load_val = a_load[j].template get<k>();
-              TT update_val = (k == j) ? load_val - R_shift : load_val;
+              diag_val = (k == j) ? load_val : diag_val;
+              col_dummy[k] =  load_val ; // write_val;
+            }
+
+          });
+
+          diag_val = diag_val - R_shift;
+
+          // Preload col and a_i with the correct data for the current iteration
+          // These are going to be use to compute the dot product of two
+          // different columns of the input matrix.
+          fpga_tools::UnrolledLoop<rows>([&](auto k) {
+            // find which fanout bank this unrolled iteration is going to use
+            constexpr auto fanout_bank_idx = k / kFanoutReduction;
+            
+
+            if (!i_gt_0[fanout_bank_idx]) {
+              // supporting matrix deflation
+              TT load_val = col_dummy[k];
+              TT update_val = (k == j) ? diag_val : load_val;
               TT write_val = (k >= kDM_size || j >= kDM_size) ? 0 : update_val;
-              col[k] = write_val;
+              col[k] =  write_val;
             }
 
             // Load a_i for reuse across j iterations
