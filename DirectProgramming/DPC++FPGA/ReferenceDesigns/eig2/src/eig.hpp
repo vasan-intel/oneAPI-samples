@@ -234,7 +234,7 @@ struct StreamingQRD {
       TT l_shift = c_wilk - (sign_lamda*b_wilk*b_wilk)/(fabs(lamda) + sqrt(lamda * lamda + b_wilk*b_wilk));
 
       R_shift = RELSHIFT ? c_wilk : l_shift;
-      R_shift -= SHIFT_NOISE;
+      R_shift -= R_shift*SHIFT_NOISE; //SHIFT_NOISE;
   
       // size of Deflated matrix
       int kDM_size = rows;
@@ -243,7 +243,7 @@ struct StreamingQRD {
 
 
       bool QR_iteration_done = 0;
-      const int iterPerEigen = 3;
+      const int iterPerEigen = 5;
       // this implementation assumes fiding eigen each eigen value 
       // doesn't require no more than iterPerEigen
       const int QR_RQ_iterations = (rows-1)*iterPerEigen;
@@ -603,7 +603,7 @@ struct StreamingQRD {
           kDM_size = kDM_size -1;
         }
 
-        R_shift -= SHIFT_NOISE;
+        R_shift -= R_shift*SHIFT_NOISE; //SHIFT_NOISE;
         
 
 

@@ -15,11 +15,11 @@
 
 // dpc_common.hpp can be found in the dev-utilities include folder.
 // e.g., $ONEAPI_ROOT/dev-utilities//include/dpc_common.hpp
-#define KTHRESHOLD 1e-4
+#define KTHRESHOLD 1e-5
 #define KDEFLIM 2
-#define KETHRESHOLD 1e-2
+#define KETHRESHOLD 1e-3
 #define RELSHIFT 0
-#define SHIFT_NOISE 1e-3
+#define SHIFT_NOISE 1e-2
 #include "dpc_common.hpp"
 
 #include "qrd.hpp"
@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  constexpr size_t kMatricesToDecompose = 1;
+  constexpr size_t kMatricesToDecompose = 30;
 
   try {
     // SYCL boilerplate
@@ -218,6 +218,7 @@ int main(int argc, char *argv[]) {
     std::vector<T> eigen_vectors_cpu(kAMatrixSize * kMatricesToDecompose);
     std::vector<T> TmpRow(kRows);
     std::vector<int> sIndex(kRows);
+    std::vector<int> sIndexSYCL(kRows);
 
     // data strucutre for golden results from numpy 
     std::vector<T> py_w(kRows*kMatricesToDecompose);
@@ -305,7 +306,7 @@ int main(int argc, char *argv[]) {
         T sign_lamda = (lamda > 0) - (lamda < 0);
 
         T shift = RELSHIFT ? c_wilk : c_wilk - (sign_lamda*b_wilk*b_wilk)/(fabs(lamda) + sqrt(lamda * lamda + b_wilk*b_wilk));
-        shift -= SHIFT_NOISE;
+        shift -= shift*SHIFT_NOISE; //SHIFT_NOISE;
 
         for(int i = 0; i < kP; i++){
           a_matrix_cpu[matrix_offset+i*kRows+i] -= shift;
@@ -365,6 +366,7 @@ int main(int argc, char *argv[]) {
     }
 
 
+    int passsed_marixes = 0;
 /////////////////////////////////////////////////////////////////////
 ///////////////////////// Sorting and matching with golden value ///
 /////////////////////////////////////////////////////////////////////
@@ -380,11 +382,15 @@ int main(int argc, char *argv[]) {
     // the order of eigen values might be different 
     for(int i = 0; i < kRows; i++){
       sIndex[i] = i;
+      sIndexSYCL[i] = i;
     }
 
     // sorting the eigen values 
     std::sort(sIndex.begin(), sIndex.end(), [=](int a, int b) \
       { return fabs(a_matrix_cpu[matrix_offset+a*kRows+a]) > fabs(a_matrix_cpu[matrix_offset+b*kRows+b]);});
+
+    std::sort(sIndexSYCL.begin(), sIndexSYCL.end(), [=](int a, int b) \
+      { return fabs(rq_matrix[matrix_offset+a*kRows+a]) > fabs(rq_matrix[matrix_offset+b*kRows+b]);});
 
     // Printig the diff matrix 
     // std::cout << "\nRQ matrix from cpu computation: \n";
@@ -408,11 +414,12 @@ int main(int argc, char *argv[]) {
     int rq_ecount_CPP = 0;
     for(int i = 0; i < kRows; i++){
       int sI = sIndex[i];
-      if(fabs(fabs(py_w[evec_offset+i]) - fabs(rq_matrix[matrix_offset + sI*kRows+sI])) > diff_threshold 
-      || isnan(py_w[evec_offset+i]) || isnan(rq_matrix[matrix_offset + sI*kRows+sI])){
+      int sIS = sIndexSYCL[i];
+      if(fabs(fabs(py_w[evec_offset+i]) - fabs(rq_matrix[matrix_offset + sIS*kRows+sIS])) > diff_threshold 
+      || isnan(py_w[evec_offset+i]) || isnan(rq_matrix[matrix_offset + sIS*kRows+sIS])){
         rq_ecount_SYCL++;
         std::cout << "Mis matched values are: " << py_w[evec_offset+i] \
-        << ", " << rq_matrix[matrix_offset + sI*kRows+sI] << " at i: " << i << "\n";
+        << ", " << rq_matrix[matrix_offset + sIS*kRows+sIS] << " at i: " << i << "\n";
       }
 
       if(fabs(fabs(py_w[evec_offset+i]) - fabs(a_matrix_cpu[matrix_offset + sI*kRows+sI])) > diff_threshold 
@@ -422,14 +429,14 @@ int main(int argc, char *argv[]) {
     }
 
     if(rq_ecount_SYCL == 0){
-      std::cout << "\nMatrix: " << matrix_index << " passed:  Kernel eigen values and numpy values are matched\n";
+      // std::cout << "\nMatrix: " << matrix_index << " passed:  Kernel eigen values and numpy values are matched\n";
     } else {
       std::cout << "\nMatrix: " << matrix_index << " Error is found between kernel and numpy eigen values, Mismatch count: " \
        << rq_ecount_SYCL << "\n";
     }
 
     if(rq_ecount_CPP == 0){
-      std::cout << "Matrix: " << matrix_index << " passed:  CPU eigen values and numpy values are matched\n";
+      // std::cout << "Matrix: " << matrix_index << " passed:  CPU eigen values and numpy values are matched\n";
     } else {
       std::cout << "Matrix: " << matrix_index << " Error: Mismatch is found between CPU and numpy eigen values, Mismatch count: " \
        << rq_ecount_CPP << "\n";
@@ -461,15 +468,15 @@ int main(int argc, char *argv[]) {
         sq_error_cpp += (fabs(eigen_vectors_cpu[matrix_offset+ j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+ i*kRows+j])) * \
                           (fabs(eigen_vectors_cpu[ matrix_offset+ j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+i*kRows+j]));
 
-        sq_error_SYCL += (fabs(qq_matrix[matrix_offset+j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+i*kRows+j])) * \
-                  (fabs(qq_matrix[matrix_offset+j*kRows+sIndex[i]]) - fabs(py_V[matrix_offset+i*kRows+j]));
+        sq_error_SYCL += (fabs(qq_matrix[matrix_offset+j*kRows+sIndexSYCL[i]]) - fabs(py_V[matrix_offset+i*kRows+j])) * \
+                  (fabs(qq_matrix[matrix_offset+j*kRows+sIndexSYCL[i]]) - fabs(py_V[matrix_offset+i*kRows+j]));
       }
       // std::cout << "\n";
     }
 
 
-    std::cout << "\n\n" << "Matrix: " << matrix_index << " Numpy-CPP ABS square error sum is: " << sq_error_cpp << "\n";
-    std::cout << "Matrix: " << matrix_index << " Numpy-SYCL ABS square error sum is: " << sq_error_SYCL << "\n\n";
+    // std::cout << "\n\n" << "Matrix: " << matrix_index << " Numpy-CPP ABS square error sum is: " << sq_error_cpp << "\n";
+    // std::cout << "Matrix: " << matrix_index << " Numpy-SYCL ABS square error sum is: " << sq_error_SYCL << "\n\n";
 
     int qq_ecountCPP = 0;
     for(int i = 0; i < kRows; i++){
@@ -486,10 +493,10 @@ int main(int argc, char *argv[]) {
     int qq_ecountSYCL = 0;
     for(int i = 0; i < kRows; i++){
       for(int j = 0; j < kRows; j++){
-        if(fabs(fabs(py_V[matrix_offset + i*kRows+j]) - fabs(qq_matrix[matrix_offset + j*kRows+sIndex[i]])) > diff_threshold 
-        || isnan(qq_matrix[matrix_offset + j*kRows+sIndex[i]]) || isnan(py_V[matrix_offset + i*kRows+j])){
+        if(fabs(fabs(py_V[matrix_offset + i*kRows+j]) - fabs(qq_matrix[matrix_offset + j*kRows+sIndexSYCL[i]])) > diff_threshold 
+        || isnan(qq_matrix[matrix_offset + j*kRows+sIndexSYCL[i]]) || isnan(py_V[matrix_offset + i*kRows+j])){
           qq_ecountSYCL++;
-          std::cout << "SYCL Mis matched values are: " << py_V[matrix_offset + i*kRows+j] << ", " << qq_matrix[matrix_offset + j*kRows+sIndex[i]]  << " at i,j:"
+          std::cout << "SYCL Mis matched values are: " << py_V[matrix_offset + i*kRows+j] << ", " << qq_matrix[matrix_offset + j*kRows+sIndexSYCL[i]]  << " at i,j:"
            << i << "," << j << "\n";
         }
       }
@@ -498,16 +505,17 @@ int main(int argc, char *argv[]) {
 
 
     if(qq_ecountCPP == 0){
-      std::cout << "\nMatrix: " << matrix_index \
-      << " passed:  CPU eigen vectors and numpy Eigen vectors are matched\n";
+      // std::cout << "\nMatrix: " << matrix_index \
+      // << " passed:  CPU eigen vectors and numpy Eigen vectors are matched\n";
     } else {
       std::cout << "\nMatrix: " << matrix_index \
       << "  Error: Mismatch is found between CPU QQ and nump QQ, count: " << qq_ecountCPP << "\n";
     }
 
     if(qq_ecountSYCL == 0){
-      std::cout << "Matrix: " << matrix_index \
-      << " passed:  SYCL and numpy Eigen vectors are matched\n";
+      passsed_marixes++;
+      // std::cout << "Matrix: " << matrix_index \
+      // << " passed:  SYCL and numpy Eigen vectors are matched\n";
     } else {
       std::cout  << "Matrix: " << matrix_index \
       << "  Error: Mismatch is found between SYCL and numpy QQ, count: " << qq_ecountSYCL << "\n";
@@ -517,6 +525,8 @@ int main(int argc, char *argv[]) {
 
 
     // std::cout << std::endl << "PASSED" << std::endl;
+
+  std::cout << "Passed matrix percenage is " << (100.0 *passsed_marixes)/kMatricesToDecompose << "\n";
     return 0;
 
   } catch (sycl::exception const &e) {
