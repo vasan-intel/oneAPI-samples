@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  constexpr size_t kMatricesToDecompose = 30;
+  constexpr size_t kMatricesToDecompose = 200;
 
   try {
     // SYCL boilerplate
@@ -246,42 +246,52 @@ int main(int argc, char *argv[]) {
           eigen_vectors_cpu[matrix_offset + i*kRows+j] = (i == j) ? 1 : 0;
         }
       }
+    }
 
 
       // Writing the input matrix to a file
       // python script will read the file and process
-      std::ofstream osA("mat_A.txt");
+    std::ofstream osA("mat_A.txt");
+    for(int matrix_index = 0; matrix_index <kMatricesToDecompose; matrix_index++){
+      int matrix_offset = matrix_index * kAMatrixSize;
+      int evec_offset = matrix_index * kRows;
       for(int i = 0; i < kRows; i++){
         for(int j = 0; j < kRows; j++){
           osA << std::setprecision(15) << a_matrix[matrix_offset+j*kRows+i];
-          if(j != kRows-1 || i != kRows-1){
+          if(j != kRows-1 || i != kRows-1 || matrix_index != kMatricesToDecompose-1){
             osA << ",";
           }
         }
       }
-      osA.close();
+    }
+    osA.close();
 
-      // executing the python script 
-      if(system("python2 ../src/eig_IQR.py") != 0){
-        std::cout << "Error occured when trying to execute the python script\n";
-      }
+    // executing the python script 
+    std::string cmd = "python2 ../src/eig_IQR.py " + std::to_string(kMatricesToDecompose) + " " + std::to_string(kRows);
+    if(system(cmd.c_str()) != 0){
+      std::cout << "Error occured when trying to execute the python script\n";
+    }
 
       // reading back golden results: eigen values 
-      std::ifstream osW("mat_W.txt");
+    std::ifstream osW("mat_W.txt");
+    std::ifstream osV("mat_V.txt");  
+    for(int matrix_index = 0; matrix_index <kMatricesToDecompose; matrix_index++){
+      int matrix_offset = matrix_index * kAMatrixSize;
+      int evec_offset = matrix_index * kRows;
       for(int i = 0; i < kRows; i++){
         osW >> py_w[i+evec_offset];
       }
-      osW.close();
-
+      
       // reading back golden results
-      std::ifstream osV("mat_V.txt");  
       for(int i = 0; i < kRows; i++){
         for(int j = 0; j < kRows; j++){
           osV >> py_V[matrix_offset+i*kRows+j];
         }
       }
-      osV.close();
+      
     }
+    osW.close();
+    osV.close();
 
 
 ////////////////////////////////////////////////////////////////
