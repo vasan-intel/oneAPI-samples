@@ -21,7 +21,7 @@
 #define KETHRESHOLD_Eigen 1e-3
 #define RELSHIFT 0
 #define SHIFT_NOISE 1e-2
-#include "dpc_common.hpp"
+#include "exception_handler.hpp"
 
 #include "qrd.hpp"
 #include "qr_MGS.hpp"
@@ -131,16 +131,16 @@ int main(int argc, char *argv[]) {
   try {
     // SYCL boilerplate
 #if defined(FPGA_EMULATOR)
-    sycl::ext::intel::fpga_emulator_selector device_selector;
+    auto device_selector = sycl::ext::intel::fpga_emulator_selector_v;
 #else
-    sycl::ext::intel::fpga_selector device_selector;
+    auto device_selector = sycl::ext::intel::fpga_selector_v;
 #endif
 
     // Enable the queue profiling to time the execution
     sycl::property_list
                     queue_properties{sycl::property::queue::enable_profiling()};
     sycl::queue q = sycl::queue(device_selector,
-                                dpc_common::exception_handler,
+                                fpga_tools::exception_handler,
                                 queue_properties);
 
     sycl::device device = q.get_device();

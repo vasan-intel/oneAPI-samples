@@ -239,7 +239,7 @@ struct StreamingQRD {
       // size of Deflated matrix
       int kDM_size = rows;
 
-      int converge_itr = 1;
+      // int converge_itr = 1;
 
 
       bool QR_iteration_done = 0;
@@ -581,7 +581,6 @@ struct StreamingQRD {
           }
         }
 
-        int itr_i = itr;
 
         TT lamda = (a_wilk-c_wilk)/2.0;
         TT sign_lamda = (lamda > 0) - (lamda < 0);
