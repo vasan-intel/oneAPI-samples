@@ -243,7 +243,7 @@ struct StreamingQRD {
 
 
       bool QR_iteration_done = 0;
-      const int iterPerEigen = 5;
+      const int iterPerEigen = 8;
       // this implementation assumes fiding eigen each eigen value 
       // doesn't require no more than iterPerEigen
       const int QR_RQ_iterations = (rows-1)*iterPerEigen;

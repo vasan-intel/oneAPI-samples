@@ -32,16 +32,22 @@ if __name__ == "__main__":
     w_str = ""
     v_str = ""
     for i in range(Matrices):
+        if(i == 189):
+            print("input matrix is:\n")
+            print(C[i, :, :])
         if(not is_invertible(C[i, :, :])):
             print("This matrix is singular")
 
         w,v = np.linalg.eig(C[i, :, :])
+        if(i == 189):
+            print(w)
+
         w_abs =np.array([abs(w[i]) for i in range(w.shape[0])])
         w_sort_index = w_abs.argsort()[::-1]
+
         w = w[w_sort_index]
         v = np.transpose(v)
         v = v[w_sort_index]
-
 
 
 
